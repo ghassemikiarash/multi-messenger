@@ -89,19 +89,6 @@ function renderSidebar() {
       ]);
     };
     wrap.appendChild(fb);
-    if (f.open) {
-      const inner = document.createElement('div');
-      inner.className = 'folder-items';
-      wrap.appendChild(inner);
-      (f.itemIds || []).forEach((id) => {
-        if (byId[id]) {
-          const tempList = list;
-          // render into inner
-          const holder = document.createElement('div');
-          list.appendChild(wrap);
-        }
-      });
-    }
     list.appendChild(wrap);
     if (f.open) {
       (f.itemIds || []).forEach((id) => { if (byId[id]) addBtn(byId[id]); });
@@ -193,14 +180,12 @@ function renderHelp() {
   $('chkUp').onclick = async () => {
     $('upMsg').textContent = 'در حال بررسی...';
     const r = await window.api.checkUpdate();
-    if (!r.ok) { $('upMsg').textContent = 'خطا: ' + (r.error || ''); return; }
-    if (r.available) {
-      $('upMsg').textContent = 'نسخه جدید ' + r.latest + ' — در حال دانلود';
-      const d = await window.api.downloadUpdate();
-      $('upMsg').textContent = d.ok ? 'دانلود شد. بعد از بستن برنامه نصب می‌شود.' : ('خطا: ' + d.error);
-    } else {
-      $('upMsg').textContent = 'نسخه فعلی به‌روز است (' + r.current + ')';
+    if (!r.ok || !r.available) {
+      $('upMsg').textContent = 'آخرین نسخه نصب است (' + ((r && r.current) || ui.version || '') + ')';
+      return;
     }
+    $('upMsg').textContent = 'نسخه جدید ' + r.latest + ' موجود است. صفحه دانلود باز شد.';
+    await window.api.downloadUpdate(r.url);
   };
 }
 
