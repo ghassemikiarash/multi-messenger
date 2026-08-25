@@ -10,33 +10,34 @@
     <div class="brand" title="Multi Messenger">MM</div>
     <div id="navList" class="nav-list"></div>
     <div class="side-footer">
-      <button class="icon-btn" id="btnAdd" title="افزودن">+</button>
-      <button class="icon-btn" id="btnHelp" title="راهنما">i</button>
-      <button class="icon-btn" id="btnLock" title="قفل">⌘</button>
+      <button class="icon-btn" id="btnAdd" title="+">+</button>
+      <button class="icon-btn" id="btnLock" title="Lock">&#128274;</button>
+      <button class="icon-btn" id="btnSettings" title="Settings">&#9881;</button>
     </div>
   </aside>
-
   <div id="lockScreen" class="overlay hidden">
     <div class="card">
       <div class="logo-lg">MM</div>
-      <h1>ورود به Multi Messenger</h1>
-      <p class="muted">رمز عبور را وارد کنید</p>
-      <input id="unlockInput" type="password" placeholder="رمز عبور" />
-      <button class="primary" id="unlockBtn">ورود</button>
+      <h1 id="lockTitle">Multi Messenger</h1>
+      <p class="muted" id="lockHint"></p>
+      <input id="unlockInput" type="password" />
+      <button class="primary" id="unlockBtn">OK</button>
       <p id="unlockErr" class="error"></p>
     </div>
   </div>
-
+  <div id="modal" class="overlay hidden">
+    <div class="modal" id="modalBox"></div>
+  </div>
   <div id="drawer" class="drawer hidden">
     <div class="drawer-head">
-      <h2 id="drawerTitle">افزودن</h2>
-      <button class="ghost" id="drawerClose">بستن</button>
+      <h2 id="drawerTitle"></h2>
+      <button class="ghost" id="drawerClose">X</button>
     </div>
     <div id="drawerBody" class="drawer-body"></div>
   </div>
-
   <div id="ctx" class="ctx hidden"></div>
   <script src="icons.js"></script>
+  <script src="i18n.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
