@@ -23,6 +23,6 @@ contextBridge.exposeInMainWorld('api', {
   unlock: (password) => ipcRenderer.invoke('unlock', password),
   lockNow: () => ipcRenderer.send('lock-now'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
-  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),
   openExternal: (url) => ipcRenderer.send('open-external', url),
 });

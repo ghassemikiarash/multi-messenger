@@ -9,15 +9,12 @@
     "start": "electron .",
     "build": "electron-builder --win nsis"
   },
-  "dependencies": {
-    "electron-updater": "^6.3.9"
-  },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.ghassemikiarash.multimessenger",
+    "appId": "com.yourname.multimessenger",
     "productName": "Multi Messenger",
     "directories": { "output": "dist" },
     "files": [
@@ -30,18 +27,6 @@
     "win": {
       "target": "nsis",
       "icon": "icons/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "deleteAppDataOnUninstall": false,
-      "artifactName": "Multi Messenger Setup ${version}.exe"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "ghassemikiarash",
-      "repo": "multi-messenger"
     }
   }
 }
