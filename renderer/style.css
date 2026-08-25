@@ -1,0 +1,92 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #1e1f22;
+  overflow: hidden;
+}
+
+#sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 68px;
+  background: #1e1f22;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-app-region: drag;
+  scrollbar-width: thin;
+}
+
+#sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+#sidebar::-webkit-scrollbar-thumb {
+  background: #4a4d52;
+  border-radius: 2px;
+}
+
+.service-btn {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  color: white;
+  border: 2px solid transparent;
+  transition: border-radius 0.15s ease, border-color 0.15s ease;
+  position: relative;
+}
+
+.service-btn .badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: #1e1f22;
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #4a4d52;
+}
+
+.service-btn:hover {
+  border-radius: 12px;
+}
+
+.service-btn.active {
+  border-color: #fff;
+  border-radius: 12px;
+}
+
+.add-btn {
+  background: #2b2d31 !important;
+  border: 2px dashed #4a4d52 !important;
+  font-size: 24px;
+  font-weight: bold;
+  color: #b5bac1;
+}
+
+.add-btn:hover {
+  border-color: #fff !important;
+  color: #fff;
+}

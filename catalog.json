@@ -1,0 +1,12 @@
+[
+  { "appId": "telegram", "name": "Telegram", "url": "https://web.telegram.org/a/", "icon": "✈️", "color": "#2AABEE" },
+  { "appId": "discord", "name": "Discord", "url": "https://discord.com/app", "icon": "🎮", "color": "#5865F2" },
+  { "appId": "twitter", "name": "Twitter / X", "url": "https://x.com/home", "icon": "𝕏", "color": "#000000" },
+  { "appId": "facebook", "name": "Facebook", "url": "https://www.facebook.com/", "icon": "📘", "color": "#1877F2" },
+  { "appId": "instagram", "name": "Instagram", "url": "https://www.instagram.com/", "icon": "📷", "color": "#E1306C" },
+  { "appId": "tiktok", "name": "TikTok", "url": "https://www.tiktok.com/", "icon": "🎵", "color": "#010101" },
+  { "appId": "youtube", "name": "YouTube", "url": "https://www.youtube.com/", "icon": "▶️", "color": "#FF0000" },
+  { "appId": "gmail", "name": "Gmail", "url": "https://mail.google.com/", "icon": "✉️", "color": "#EA4335" },
+  { "appId": "yahoo", "name": "Yahoo Mail", "url": "https://mail.yahoo.com/", "icon": "💌", "color": "#6001D2" },
+  { "appId": "outlook", "name": "Outlook / Live Mail", "url": "https://outlook.live.com/mail/", "icon": "📧", "color": "#0078D4" }
+]

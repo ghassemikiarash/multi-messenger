@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>افزودن اکانت</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Tahoma, Vazirmatn, sans-serif;
+      background: #2b2d31;
+      color: #e3e5e8;
+      padding: 20px;
+      height: 100vh;
+    }
+    h2 {
+      font-size: 16px;
+      margin: 0 0 16px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: #b5bac1;
+    }
+    select, input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #1e1f22;
+      background: #1e1f22;
+      color: #fff;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+    .app-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .app-choice {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 4px;
+      border-radius: 10px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      font-size: 10px;
+      text-align: center;
+    }
+    .app-choice .emoji { font-size: 20px; }
+    .app-choice.selected {
+      border-color: #fff;
+      background: #35373c;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    button {
+      padding: 9px 16px;
+      border-radius: 8px;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #addBtn {
+      background: #5865F2;
+      color: white;
+    }
+    #addBtn:disabled {
+      background: #444;
+      cursor: not-allowed;
+    }
+    #cancelBtn {
+      background: #3a3c41;
+      color: #e3e5e8;
+    }
+  </style>
+</head>
+<body>
+  <h2>کدوم اپ رو اضافه کنم؟</h2>
+  <div class="app-grid" id="appGrid"></div>
+
+  <label for="labelInput">اسم دلخواه (اختیاری)</label>
+  <input id="labelInput" type="text" placeholder="مثلاً: تلگرام کاری" />
+
+  <div class="actions">
+    <button id="cancelBtn">انصراف</button>
+    <button id="addBtn" disabled>افزودن</button>
+  </div>
+
+  <script src="add-account-renderer.js"></script>
+</body>
+</html>
