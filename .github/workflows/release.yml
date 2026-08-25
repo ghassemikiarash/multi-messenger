@@ -11,28 +11,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-
       - name: Install
         run: npm install
-
       - name: Build
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win nsis
-
-      - name: List dist
-        run: dir dist
-
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.0
-          name: v1.2.0
+          tag_name: v1.2.1
+          name: v1.2.1
           files: dist/*Setup*.exe
           generate_release_notes: true
         env:
