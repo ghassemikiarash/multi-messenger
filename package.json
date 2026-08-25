@@ -1,6 +1,6 @@
 {
   "name": "multi-messenger",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "All-in-one desktop messenger — free, open source",
   "main": "main.js",
   "author": "Kiarash Ghassemi",
@@ -20,6 +20,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "native-menus.js",
       "catalog.json",
       "renderer/**/*",
       "icons/**/*"
