@@ -2,7 +2,6 @@ const { app, BrowserWindow, BrowserView, ipcMain, Menu, clipboard, session, shel
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { autoUpdater } = require('electron-updater');
 
 const SIDEBAR_WIDTH = 78;
 const catalog = require('./catalog.json');
@@ -21,7 +20,7 @@ let saveTimer = null;
 function seedState() {
   return {
     folders: [],
-    instances: catalog.slice(0, 4).map((def, i) => ({
+    instances: catalog.slice(0, 4).map((def) => ({
       instanceId: `${def.appId}-1`,
       appId: def.appId,
       label: def.name,
@@ -122,12 +121,10 @@ function showActiveView() {
 function attachViewBehaviors(instance, view) {
   const wc = view.webContents;
   wc.setUserAgent(CHROME_UA);
-
   wc.setWindowOpenHandler(({ url }) => {
     if (isSafeHttpUrl(url)) wc.loadURL(url);
     return { action: 'deny' };
   });
-
   const persistUrl = () => {
     try {
       instance.url = wc.getURL();
@@ -136,34 +133,18 @@ function attachViewBehaviors(instance, view) {
   };
   wc.on('did-navigate', persistUrl);
   wc.on('did-navigate-in-page', persistUrl);
-
   wc.on('context-menu', (_e, params) => {
-    const template = [
+    Menu.buildFromTemplate([
       { role: 'copy', enabled: params.selectionText && params.editFlags.canCopy },
       { role: 'cut', enabled: params.editFlags.canCut },
       { role: 'paste', enabled: params.editFlags.canPaste },
       { role: 'selectAll' },
       { type: 'separator' },
-      {
-        label: 'کپی متن انتخاب‌شده',
-        enabled: !!params.selectionText,
-        click: () => clipboard.writeText(params.selectionText),
-      },
-      {
-        label: 'کپی لینک',
-        visible: !!params.linkURL,
-        click: () => clipboard.writeText(params.linkURL),
-      },
-      {
-        label: 'کپی آدرس صفحه',
-        click: () => clipboard.writeText(wc.getURL()),
-      },
-      {
-        label: 'باز کردن در مرورگر',
-        click: () => shell.openExternal(wc.getURL()),
-      },
-    ];
-    Menu.buildFromTemplate(template).popup({ window: mainWindow });
+      { label: 'کپی متن انتخاب‌شده', enabled: !!params.selectionText, click: () => clipboard.writeText(params.selectionText) },
+      { label: 'کپی لینک', visible: !!params.linkURL, click: () => clipboard.writeText(params.linkURL) },
+      { label: 'کپی آدرس صفحه', click: () => clipboard.writeText(wc.getURL()) },
+      { label: 'باز کردن در مرورگر', click: () => shell.openExternal(wc.getURL()) },
+    ]).popup({ window: mainWindow });
   });
 }
 
@@ -252,14 +233,13 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-
-  const relayoutEvents = ['resize', 'maximize', 'unmaximize', 'restore', 'enter-full-screen', 'leave-full-screen', 'show'];
-  relayoutEvents.forEach((ev) => mainWindow.on(ev, () => {
-    relayout();
-    setTimeout(relayout, 50);
-    setTimeout(relayout, 200);
-  }));
-
+  ['resize', 'maximize', 'unmaximize', 'restore', 'enter-full-screen', 'leave-full-screen', 'show'].forEach((ev) => {
+    mainWindow.on(ev, () => {
+      relayout();
+      setTimeout(relayout, 50);
+      setTimeout(relayout, 200);
+    });
+  });
   mainWindow.webContents.on('did-finish-load', () => {
     const lock = loadLock();
     mainWindow.webContents.send('boot', {
@@ -268,21 +248,15 @@ function createWindow() {
     });
     sendUi();
   });
-
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     const lock = loadLock();
     if (lock.enabled && lock.hash) {
       overlayOpen = true;
       hideActiveView();
-    } else if (state.activeId) {
-      switchTo(state.activeId);
-    }
+    } else if (state.activeId) switchTo(state.activeId);
   });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 function setupIpc() {
@@ -295,18 +269,15 @@ function setupIpc() {
     version: app.getVersion(),
     lockEnabled: loadLock().enabled,
   }));
-
   ipcMain.on('switch-instance', (_e, instanceId) => {
     if (typeof instanceId === 'string') switchTo(instanceId);
   });
-
   ipcMain.on('set-overlay', (_e, open) => {
     overlayOpen = !!open;
     if (overlayOpen) hideActiveView();
     else showActiveView();
     sendUi();
   });
-
   ipcMain.on('add-instance', (_e, payload) => {
     if (!payload || typeof payload !== 'object') return;
     let appDef = catalog.find((a) => a.appId === payload.appId);
@@ -314,7 +285,6 @@ function setupIpc() {
     let appId = payload.appId;
     let color = (appDef && appDef.color) || '#7c5cff';
     let name = (appDef && appDef.name) || 'Custom';
-
     if (payload.custom) {
       if (!isSafeHttpUrl(payload.url)) return;
       appId = 'custom';
@@ -322,7 +292,6 @@ function setupIpc() {
       name = payload.label || new URL(payload.url).hostname;
     } else if (!appDef) return;
     else url = appDef.url;
-
     const instanceId = uniqueId(appId);
     const instance = {
       instanceId,
@@ -338,14 +307,11 @@ function setupIpc() {
     overlayOpen = false;
     switchTo(instanceId);
   });
-
   ipcMain.on('remove-instance', async (_e, instanceId) => {
     if (typeof instanceId !== 'string') return;
     const view = views[instanceId];
     if (view) {
-      try {
-        await view.webContents.session.clearStorageData();
-      } catch {}
+      try { await view.webContents.session.clearStorageData(); } catch {}
       destroyView(instanceId);
     }
     state.instances = state.instances.filter((i) => i.instanceId !== instanceId);
@@ -358,12 +324,8 @@ function setupIpc() {
     }
     saveStateSoon();
     if (state.activeId) switchTo(state.activeId);
-    else {
-      hideActiveView();
-      sendUi();
-    }
+    else { hideActiveView(); sendUi(); }
   });
-
   ipcMain.on('rename-instance', (_e, { instanceId, label }) => {
     const inst = state.instances.find((i) => i.instanceId === instanceId);
     if (!inst || !label) return;
@@ -371,26 +333,17 @@ function setupIpc() {
     saveStateSoon();
     sendUi();
   });
-
   ipcMain.on('reorder', (_e, order) => {
     if (!Array.isArray(order)) return;
     state.order = order.filter((id) => typeof id === 'string');
     saveStateSoon();
     sendUi();
   });
-
   ipcMain.on('create-folder', (_e, name) => {
-    const folder = {
-      id: `folder-${Date.now()}`,
-      name: (name && String(name).slice(0, 40)) || 'پوشه جدید',
-      itemIds: [],
-      open: true,
-    };
-    state.folders.push(folder);
+    state.folders.push({ id: `folder-${Date.now()}`, name: (name && String(name).slice(0, 40)) || 'پوشه جدید', itemIds: [], open: true });
     saveStateSoon();
     sendUi();
   });
-
   ipcMain.on('rename-folder', (_e, { folderId, name }) => {
     const f = state.folders.find((x) => x.id === folderId);
     if (!f || !name) return;
@@ -398,7 +351,6 @@ function setupIpc() {
     saveStateSoon();
     sendUi();
   });
-
   ipcMain.on('toggle-folder', (_e, folderId) => {
     const f = state.folders.find((x) => x.id === folderId);
     if (!f) return;
@@ -406,13 +358,10 @@ function setupIpc() {
     saveStateSoon();
     sendUi();
   });
-
   ipcMain.on('move-to-folder', (_e, { instanceId, folderId }) => {
     const inst = state.instances.find((i) => i.instanceId === instanceId);
     if (!inst) return;
-    state.folders.forEach((f) => {
-      f.itemIds = (f.itemIds || []).filter((id) => id !== instanceId);
-    });
+    state.folders.forEach((f) => { f.itemIds = (f.itemIds || []).filter((id) => id !== instanceId); });
     inst.folderId = folderId || null;
     if (folderId) {
       const f = state.folders.find((x) => x.id === folderId);
@@ -421,35 +370,23 @@ function setupIpc() {
     saveStateSoon();
     sendUi();
   });
-
   ipcMain.on('delete-folder', (_e, folderId) => {
-    const f = state.folders.find((x) => x.id === folderId);
-    if (!f) return;
-    state.instances.forEach((i) => {
-      if (i.folderId === folderId) i.folderId = null;
-    });
+    state.instances.forEach((i) => { if (i.folderId === folderId) i.folderId = null; });
     state.folders = state.folders.filter((x) => x.id !== folderId);
     saveStateSoon();
     sendUi();
   });
-
-  ipcMain.handle('lock-status', () => {
-    const lock = loadLock();
-    return { enabled: !!lock.enabled };
-  });
-
+  ipcMain.handle('lock-status', () => ({ enabled: !!loadLock().enabled }));
   ipcMain.handle('set-password', (_e, { current, next }) => {
     const lock = loadLock();
     if (lock.enabled && lock.hash) {
-      const check = hashPassword(current || '', lock.salt);
-      if (check !== lock.hash) return { ok: false, error: 'رمز فعلی درست نیست' };
+      if (hashPassword(current || '', lock.salt) !== lock.hash) return { ok: false, error: 'رمز فعلی درست نیست' };
     }
     if (!next || String(next).length < 4) return { ok: false, error: 'رمز حداقل ۴ کاراکتر' };
     const salt = crypto.randomBytes(16).toString('hex');
     saveLock({ enabled: true, salt, hash: hashPassword(next, salt) });
     return { ok: true };
   });
-
   ipcMain.handle('disable-password', (_e, current) => {
     const lock = loadLock();
     if (!lock.enabled) return { ok: true };
@@ -457,7 +394,6 @@ function setupIpc() {
     saveLock({ enabled: false, salt: null, hash: null });
     return { ok: true };
   });
-
   ipcMain.handle('unlock', (_e, password) => {
     const lock = loadLock();
     if (!lock.enabled) return { ok: true };
@@ -467,7 +403,6 @@ function setupIpc() {
     else sendUi();
     return { ok: true };
   });
-
   ipcMain.on('lock-now', () => {
     const lock = loadLock();
     if (!lock.enabled) return;
@@ -475,29 +410,24 @@ function setupIpc() {
     hideActiveView();
     mainWindow.webContents.send('need-lock');
   });
-
   ipcMain.handle('check-update', async () => {
     try {
-      autoUpdater.autoDownload = false;
-      const result = await autoUpdater.checkForUpdates();
-      const info = result && result.updateInfo;
-      const latest = info && info.version;
+      const res = await fetch('https://api.github.com/repos/ghassemikiarash/multi-messenger/releases/latest', {
+        headers: { 'User-Agent': 'multi-messenger' },
+      });
+      if (!res.ok) return { ok: true, current: app.getVersion(), latest: app.getVersion(), available: false };
+      const data = await res.json();
+      const latest = String(data.tag_name || '').replace(/^v/, '');
       const current = app.getVersion();
-      return { ok: true, current, latest, available: !!(latest && latest !== current) };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e), current: app.getVersion() };
+      return { ok: true, current, latest: latest || current, available: !!(latest && latest !== current), url: data.html_url };
+    } catch {
+      return { ok: true, current: app.getVersion(), latest: app.getVersion(), available: false };
     }
   });
-
-  ipcMain.handle('download-update', async () => {
-    try {
-      await autoUpdater.downloadUpdate();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: String(e.message || e) };
-    }
+  ipcMain.handle('download-update', async (_e, url) => {
+    await shell.openExternal(url || 'https://github.com/ghassemikiarash/multi-messenger/releases/latest');
+    return { ok: true };
   });
-
   ipcMain.on('open-external', (_e, url) => {
     if (isSafeHttpUrl(url)) shell.openExternal(url);
   });
@@ -508,17 +438,6 @@ app.whenReady().then(() => {
   statePath = path.join(userDataPath, 'state.json');
   lockPath = path.join(userDataPath, 'lock.json');
   state = loadState();
-
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: 'ghassemikiarash',
-    repo: 'multi-messenger',
-  });
-  autoUpdater.autoDownload = false;
-  autoUpdater.on('update-downloaded', () => {
-    if (mainWindow) mainWindow.webContents.send('update-downloaded');
-  });
-
   setupIpc();
   createWindow();
 });
