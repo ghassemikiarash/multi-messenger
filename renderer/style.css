@@ -1,0 +1,211 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap');
+
+:root {
+  --bg: #0f1115;
+  --bg2: #171a21;
+  --line: #2a2f3a;
+  --text: #eef1f6;
+  --muted: #93a0b4;
+  --accent: #7c5cff;
+  --danger: #ff5d73;
+  --radius: 16px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Vazirmatn, Tahoma, sans-serif;
+  overflow: hidden;
+}
+
+#sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 78px;
+  background: linear-gradient(180deg, #141821, #0f1115);
+  border-left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+  z-index: 20;
+}
+
+.brand {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #7c5cff, #4cc9f0);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 6px;
+}
+
+.nav-list {
+  flex: 1;
+  width: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.nav-list::-webkit-scrollbar { width: 0; }
+
+.service-btn, .folder-btn, .icon-btn {
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: #fff;
+  position: relative;
+  transition: .18s ease;
+}
+.service-btn svg { width: 22px; height: 22px; }
+.service-btn:hover, .folder-btn:hover { transform: translateY(-1px); border-radius: 12px; }
+.service-btn.active {
+  outline: 2px solid #fff;
+  border-radius: 12px;
+}
+.folder-btn { background: #222737; font-size: 12px; color: var(--muted); }
+.folder-items { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+
+.side-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.icon-btn {
+  background: #222737;
+  color: var(--text);
+  font-size: 20px;
+}
+.icon-btn:hover { background: #2c3344; }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8,10,14,.88);
+  backdrop-filter: blur(16px);
+  z-index: 50;
+  display: grid;
+  place-items: center;
+}
+.hidden { display: none !important; }
+
+.card {
+  width: 360px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 28px;
+  text-align: center;
+}
+.logo-lg {
+  width: 64px; height: 64px; margin: 0 auto 12px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #7c5cff, #4cc9f0);
+  display: grid; place-items: center; font-weight: 800; font-size: 22px;
+}
+.muted { color: var(--muted); }
+.error { color: var(--danger); min-height: 20px; }
+input, textarea {
+  width: 100%;
+  background: #0f1115;
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0 12px;
+  font-family: inherit;
+}
+.primary, .ghost {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.primary { background: var(--accent); color: #fff; width: 100%; }
+.ghost { background: transparent; color: var(--muted); }
+
+.drawer {
+  position: fixed;
+  top: 0; bottom: 0; left: 78px;
+  width: min(420px, calc(100vw - 78px));
+  background: #12151c;
+  border-left: 1px solid var(--line);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+}
+.drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.drawer-body { padding: 16px 18px 24px; overflow-y: auto; flex: 1; }
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.app-choice {
+  background: #1a1f2a;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 12px 8px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 12px;
+}
+.app-choice svg { width: 24px; height: 24px; display: block; margin: 0 auto 6px; }
+.app-choice.selected { border-color: var(--accent); background: #221c3a; }
+
+.help a { color: #9bb7ff; }
+.donate {
+  background: #1a1f2a;
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 11px;
+  word-break: break-all;
+  direction: ltr;
+  text-align: left;
+}
+
+.ctx {
+  position: fixed;
+  z-index: 80;
+  min-width: 180px;
+  background: #1c212c;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.4);
+}
+.ctx button {
+  width: 100%;
+  text-align: right;
+  background: none;
+  border: 0;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ctx button:hover { background: #2a3140; }
+.ctx .danger { color: var(--danger); }

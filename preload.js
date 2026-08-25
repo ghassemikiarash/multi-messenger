@@ -1,0 +1,28 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  onBoot: (cb) => ipcRenderer.on('boot', (_e, data) => cb(data)),
+  onUi: (cb) => ipcRenderer.on('ui-state', (_e, data) => cb(data)),
+  onNeedLock: (cb) => ipcRenderer.on('need-lock', () => cb()),
+  onUpdateDownloaded: (cb) => ipcRenderer.on('update-downloaded', () => cb()),
+  getUi: () => ipcRenderer.invoke('get-ui'),
+  switchInstance: (id) => ipcRenderer.send('switch-instance', id),
+  setOverlay: (open) => ipcRenderer.send('set-overlay', open),
+  addInstance: (payload) => ipcRenderer.send('add-instance', payload),
+  removeInstance: (id) => ipcRenderer.send('remove-instance', id),
+  renameInstance: (instanceId, label) => ipcRenderer.send('rename-instance', { instanceId, label }),
+  reorder: (order) => ipcRenderer.send('reorder', order),
+  createFolder: (name) => ipcRenderer.send('create-folder', name),
+  renameFolder: (folderId, name) => ipcRenderer.send('rename-folder', { folderId, name }),
+  toggleFolder: (id) => ipcRenderer.send('toggle-folder', id),
+  moveToFolder: (instanceId, folderId) => ipcRenderer.send('move-to-folder', { instanceId, folderId }),
+  deleteFolder: (id) => ipcRenderer.send('delete-folder', id),
+  lockStatus: () => ipcRenderer.invoke('lock-status'),
+  setPassword: (current, next) => ipcRenderer.invoke('set-password', { current, next }),
+  disablePassword: (current) => ipcRenderer.invoke('disable-password', current),
+  unlock: (password) => ipcRenderer.invoke('unlock', password),
+  lockNow: () => ipcRenderer.send('lock-now'),
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  openExternal: (url) => ipcRenderer.send('open-external', url),
+});

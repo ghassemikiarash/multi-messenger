@@ -1,0 +1,14 @@
+[
+  { "appId": "telegram", "name": "Telegram", "url": "https://web.telegram.org/a/", "color": "#2AABEE" },
+  { "appId": "whatsapp", "name": "WhatsApp", "url": "https://web.whatsapp.com/", "color": "#25D366" },
+  { "appId": "discord", "name": "Discord", "url": "https://discord.com/app", "color": "#5865F2" },
+  { "appId": "twitter", "name": "X / Twitter", "url": "https://x.com/home", "color": "#000000" },
+  { "appId": "facebook", "name": "Facebook", "url": "https://www.facebook.com/", "color": "#1877F2" },
+  { "appId": "instagram", "name": "Instagram", "url": "https://www.instagram.com/", "color": "#E1306C" },
+  { "appId": "tiktok", "name": "TikTok", "url": "https://www.tiktok.com/", "color": "#010101" },
+  { "appId": "youtube", "name": "YouTube", "url": "https://www.youtube.com/", "color": "#FF0000" },
+  { "appId": "gmail", "name": "Gmail", "url": "https://mail.google.com/", "color": "#EA4335" },
+  { "appId": "yahoo", "name": "Yahoo Mail", "url": "https://mail.yahoo.com/", "color": "#6001D2" },
+  { "appId": "outlook", "name": "Outlook", "url": "https://outlook.live.com/mail/", "color": "#0078D4" },
+  { "appId": "tradingview", "name": "TradingView", "url": "https://www.tradingview.com/", "color": "#2962FF" }
+]
