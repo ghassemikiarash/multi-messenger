@@ -2,6 +2,8 @@ const { app, BrowserWindow, BrowserView, ipcMain, Menu, clipboard, shell } = req
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
+const attachNativeMenus = require('./native-menus');
 const SIDEBAR_WIDTH = 78;
 const catalog = require('./catalog.json');
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -9,12 +11,14 @@ let userDataPath, statePath, lockPath, state, mainWindow;
 let views = {};
 let overlayOpen = false;
 let saveTimer = null;
+let lastActivity = Date.now();
 function seedState() {
   return {
     folders: [],
     instances: catalog.slice(0, 4).map((def) => ({ instanceId: def.appId + '-1', appId: def.appId, label: def.name, color: def.color, url: def.url, folderId: null })),
     activeId: catalog[0] ? catalog[0].appId + '-1' : null,
     order: catalog.slice(0, 4).map((d) => d.appId + '-1'),
+    settings: { language: 'fa', notifications: true, autoLockMinutes: 0 },
   };
 }
 function loadState() {
@@ -23,7 +27,7 @@ function loadState() {
     if (!raw || !Array.isArray(raw.instances)) return seedState();
     const instances = raw.instances.filter((i) => i && i.instanceId && i.url);
     if (!instances.length) return seedState();
-    return { folders: raw.folders || [], instances, activeId: raw.activeId || instances[0].instanceId, order: raw.order || instances.map((i) => i.instanceId) };
+    return { folders: raw.folders || [], instances, activeId: raw.activeId || instances[0].instanceId, order: raw.order || instances.map((i) => i.instanceId), settings: raw.settings || { language: 'fa', notifications: true, autoLockMinutes: 0 } };
   } catch { return seedState(); }
 }
 function saveStateSoon() {
@@ -63,6 +67,10 @@ function createViewForInstance(instance) {
   wc.on('did-navigate-in-page', persistUrl);
   wc.on('context-menu', (_e, params) => {
     Menu.buildFromTemplate([
+      { label: 'بازگشت', enabled: wc.canGoBack(), click: () => wc.goBack() },
+      { label: 'جلو', enabled: wc.canGoForward(), click: () => wc.goForward() },
+      { label: 'بارگذاری مجدد', click: () => wc.reload() },
+      { type: 'separator' },
       { role: 'copy', enabled: !!(params.selectionText && params.editFlags.canCopy) },
       { role: 'paste', enabled: params.editFlags.canPaste },
       { label: 'کپی لینک', visible: !!params.linkURL, click: () => clipboard.writeText(params.linkURL) },
@@ -86,7 +94,7 @@ function switchTo(instanceId) {
 }
 function sendUi() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('ui-state', { instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), overlayOpen });
+  mainWindow.webContents.send('ui-state', { instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), overlayOpen, settings: state.settings, lockEnabled: !!loadLock().enabled });
 }
 function uniqueId(appId) {
   const ids = new Set(state.instances.map((i) => i.instanceId));
@@ -110,7 +118,7 @@ function createWindow() {
   });
 }
 function setupIpc() {
-  ipcMain.handle('get-ui', () => ({ instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion() }));
+  ipcMain.handle('get-ui', () => ({ instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), settings: state.settings, lockEnabled: !!loadLock().enabled }));
   ipcMain.on('switch-instance', (_e, id) => { if (typeof id === 'string') switchTo(id); });
   ipcMain.on('set-overlay', (_e, open) => { overlayOpen = !!open; if (overlayOpen) hideActiveView(); else showActiveView(); });
   ipcMain.on('add-instance', (_e, payload) => {
@@ -154,6 +162,22 @@ function setupIpc() {
     ia.folderId = folder.id; if (!folder.itemIds.includes(a)) folder.itemIds.push(a);
     saveStateSoon(); sendUi();
   });
+  ipcMain.on('reorder-item', (_e, { draggedId, targetId }) => {
+    if (!draggedId || !targetId || draggedId === targetId) return;
+    const inst = state.instances.find((i) => i.instanceId === draggedId);
+    if (!inst) return;
+    state.folders.forEach((f) => { f.itemIds = (f.itemIds || []).filter((id) => id !== draggedId); });
+    inst.folderId = null;
+    state.order = state.order.filter((id) => id !== draggedId);
+    const idx = state.order.indexOf(targetId);
+    if (idx === -1) state.order.push(draggedId); else state.order.splice(idx, 0, draggedId);
+    saveStateSoon(); sendUi();
+  });
+  ipcMain.on('save-settings', (_e, settings) => {
+    state.settings = { ...state.settings, ...(settings || {}) };
+    saveStateSoon(); sendUi();
+  });
+  ipcMain.on('user-activity', () => { lastActivity = Date.now(); });
   ipcMain.on('delete-folder', (_e, folderId) => {
     state.instances.forEach((i) => { if (i.folderId === folderId) i.folderId = null; });
     state.folders = state.folders.filter((x) => x.id !== folderId); saveStateSoon(); sendUi();
@@ -187,6 +211,23 @@ function setupIpc() {
     } catch { return { ok: true, current: app.getVersion(), available: false }; }
   });
   ipcMain.handle('download-update', async (_e, url) => { await shell.openExternal(url || 'https://github.com/ghassemikiarash/multi-messenger/releases/latest'); return { ok: true }; });
+  ipcMain.handle('apply-update', async () => {
+    try {
+      const res = await fetch('https://api.github.com/repos/ghassemikiarash/multi-messenger/releases/latest', { headers: { 'User-Agent': 'multi-messenger' } });
+      if (!res.ok) return { ok: false, error: 'دریافت اطلاعات نسخه ناموفق بود' };
+      const data = await res.json();
+      const asset = (data.assets || []).find((a) => /Setup.*\.exe$/i.test(a.name));
+      if (!asset) return { ok: false, error: 'فایل نصبی در نسخه جدید پیدا نشد' };
+      const fileRes = await fetch(asset.browser_download_url);
+      if (!fileRes.ok) return { ok: false, error: 'دانلود فایل نصبی ناموفق بود' };
+      const buf = Buffer.from(await fileRes.arrayBuffer());
+      const tmpPath = path.join(app.getPath('temp'), asset.name);
+      fs.writeFileSync(tmpPath, buf);
+      spawn(tmpPath, ['/S'], { detached: true, stdio: 'ignore' }).unref();
+      setTimeout(() => app.quit(), 1000);
+      return { ok: true };
+    } catch (e) { return { ok: false, error: 'خطا در بروزرسانی' }; }
+  });
   ipcMain.on('open-external', (_e, url) => { if (isSafeHttpUrl(url)) shell.openExternal(url); });
 }
 app.whenReady().then(() => {
@@ -195,7 +236,32 @@ app.whenReady().then(() => {
   lockPath = path.join(userDataPath, 'lock.json');
   state = loadState();
   setupIpc();
+  attachNativeMenus(() => ({ state, mainWindow, refresh: sendUi }));
   createWindow();
+
+  setInterval(() => {
+    const minutes = (state.settings && state.settings.autoLockMinutes) || 0;
+    if (!minutes || overlayOpen) return;
+    const lock = loadLock();
+    if (!lock.enabled || !lock.hash) return;
+    if (Date.now() - lastActivity > minutes * 60 * 1000) {
+      overlayOpen = true; hideActiveView();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('need-lock');
+    }
+  }, 30 * 1000);
+
+  setTimeout(async () => {
+    try {
+      const res = await fetch('https://api.github.com/repos/ghassemikiarash/multi-messenger/releases/latest', { headers: { 'User-Agent': 'multi-messenger' } });
+      if (!res.ok) return;
+      const data = await res.json();
+      const latest = String(data.tag_name || '').replace(/^v/, '');
+      const current = app.getVersion();
+      if (latest && latest !== current && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update-available', { latest, current, url: data.html_url });
+      }
+    } catch {}
+  }, 4000);
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

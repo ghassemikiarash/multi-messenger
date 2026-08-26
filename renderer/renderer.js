@@ -52,7 +52,10 @@ function bindDrag(el, payload) {
     let data; try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
     if (!data || data.id === payload.id) return;
     if (payload.type === 'folder' && data.type === 'item') window.api.moveToFolder(data.id, payload.id);
-    else if (payload.type === 'item' && data.type === 'item') window.api.stackItems(data.id, payload.id);
+    else if (payload.type === 'item' && data.type === 'item') {
+      if (e.altKey) window.api.stackItems(data.id, payload.id);
+      else window.api.reorderItem(data.id, payload.id);
+    }
   };
 }
 
@@ -181,3 +184,35 @@ if (window.api.onAskRename) {
     else askName('نام پوشه', payload.value, (n) => window.api.renameFolder(payload.id, n));
   });
 }
+
+if (window.api.onAskDelete) {
+  window.api.onAskDelete((instanceId) => {
+    const inst = (ui.instances || []).find((i) => i.instanceId === instanceId);
+    const name = inst ? inst.label : 'این اکانت';
+    if (confirm('«' + name + '» حذف بشه؟ لاگین و اطلاعاتش برای همیشه پاک میشه.')) {
+      window.api.removeInstance(instanceId);
+    }
+  });
+}
+
+function showUpdateToast(data) {
+  const bar = document.createElement('div');
+  bar.className = 'update-toast';
+  bar.innerHTML = '<span>نسخه جدید ' + data.latest + ' آماده است</span><button class="primary" id="updNow">بروزرسانی</button><button class="ghost" id="updLater">بعداً</button>';
+  document.body.appendChild(bar);
+  $('updLater').onclick = () => bar.remove();
+  $('updNow').onclick = async () => {
+    bar.innerHTML = '<span>در حال دانلود و نصب…</span>';
+    const r = await window.api.applyUpdate();
+    if (!r.ok) { bar.innerHTML = '<span>' + (r.error || 'بروزرسانی ناموفق بود') + '</span><button class="ghost" id="updClose">بستن</button>'; $('updClose').onclick = () => bar.remove(); }
+  };
+}
+if (window.api.onUpdateAvailable) window.api.onUpdateAvailable(showUpdateToast);
+
+['mousemove', 'keydown', 'click'].forEach((ev) => {
+  let last = 0;
+  document.addEventListener(ev, () => {
+    const now = Date.now();
+    if (now - last > 10000) { last = now; window.api.ping(); }
+  });
+});
