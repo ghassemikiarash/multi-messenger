@@ -4,18 +4,57 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const attachNativeMenus = require('./native-menus');
+let ElectronBlocker = null;
+try { ElectronBlocker = require('@ghostery/adblocker-electron').ElectronBlocker; } catch { ElectronBlocker = null; }
+
+// Privacy: stop WebRTC from leaking the real local/public IP behind a VPN/proxy (Brave does this by default)
+app.commandLine.appendSwitch('webrtc-ip-handling-policy', 'disable_non_proxied_udp');
+app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'disable_non_proxied_udp');
+app.commandLine.appendSwitch('enable-features', 'WebRtcHideLocalIpsWithMdns');
+
 const SIDEBAR_WIDTH = 78;
+const TOOLBAR_HEIGHT = 78;
 const catalog = require('./catalog.json');
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 let userDataPath, statePath, lockPath, state, mainWindow;
-let views = {};
+let views = {}; // key: `${instanceId}::${tabId}`
 let overlayOpen = false;
 let saveTimer = null;
 let lastActivity = Date.now();
+let blocker = null;
+let blockedPartitions = new Set();
+let headerPartitions = new Set();
+let pendingBlockerViews = [];
+
+async function initAdblock() {
+  if (!ElectronBlocker) return;
+  try {
+    const enginePath = path.join(app.getPath('userData'), 'adblock-engine.bin');
+    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, { path: enginePath, read: fs.promises.readFile, write: fs.promises.writeFile });
+    const pending = pendingBlockerViews; pendingBlockerViews = [];
+    pending.forEach(({ partition, view }) => { if (!view.webContents.isDestroyed()) attachBlockerToPartition(partition, view); });
+  } catch (e) { console.error('adblock init failed:', e && e.message); }
+}
+function attachBlockerToPartition(partition, view) {
+  if (blockedPartitions.has(partition)) return;
+  if (!blocker) { pendingBlockerViews.push({ partition, view }); return; }
+  try { blocker.enableBlockingInSession(view.webContents.session); blockedPartitions.add(partition); } catch {}
+}
+function applyPrivacyHeaders(partition, ses) {
+  if (headerPartitions.has(partition)) return;
+  headerPartitions.add(partition);
+  try {
+    ses.webRequest.onBeforeSendHeaders((details, callback) => {
+      details.requestHeaders['DNT'] = '1';
+      details.requestHeaders['Sec-GPC'] = '1';
+      callback({ requestHeaders: details.requestHeaders });
+    });
+  } catch {}
+}
 function seedState() {
   return {
     folders: [],
-    instances: catalog.slice(0, 4).map((def) => ({ instanceId: def.appId + '-1', appId: def.appId, label: def.name, color: def.color, url: def.url, folderId: null })),
+    instances: catalog.slice(0, 4).map((def) => ({ instanceId: def.appId + '-1', appId: def.appId, label: def.name, color: def.color, url: def.url, folderId: null, tabs: [{ id: 'tab-1', url: def.url, title: def.name }], activeTabId: 'tab-1' })),
     activeId: catalog[0] ? catalog[0].appId + '-1' : null,
     order: catalog.slice(0, 4).map((d) => d.appId + '-1'),
     settings: { language: 'fa', notifications: true, autoLockMinutes: 0 },
@@ -25,7 +64,11 @@ function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
     if (!raw || !Array.isArray(raw.instances)) return seedState();
-    const instances = raw.instances.filter((i) => i && i.instanceId && i.url);
+    const instances = raw.instances.filter((i) => i && i.instanceId && i.url).map((i) => {
+      if (!Array.isArray(i.tabs) || !i.tabs.length) return { ...i, tabs: [{ id: 'tab-1', url: i.url, title: i.label }], activeTabId: 'tab-1' };
+      if (!i.activeTabId || !i.tabs.some((t) => t.id === i.activeTabId)) i.activeTabId = i.tabs[0].id;
+      return i;
+    });
     if (!instances.length) return seedState();
     return { folders: raw.folders || [], instances, activeId: raw.activeId || instances[0].instanceId, order: raw.order || instances.map((i) => i.instanceId), settings: raw.settings || { language: 'fa', notifications: true, autoLockMinutes: 0 } };
   } catch { return seedState(); }
@@ -38,14 +81,28 @@ function loadLock() { try { return JSON.parse(fs.readFileSync(lockPath, 'utf-8')
 function saveLock(lock) { fs.writeFileSync(lockPath, JSON.stringify(lock)); }
 function hashPassword(password, salt) { return crypto.scryptSync(String(password), salt, 32).toString('hex'); }
 function isSafeHttpUrl(url) { try { const u = new URL(url); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; } }
+function normalizeAddress(input) {
+  const s = String(input || '').trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(s) && !s.includes(' ')) return 'https://' + s;
+  return 'https://www.google.com/search?q=' + encodeURIComponent(s);
+}
+function tabKey(instanceId, tabId) { return instanceId + '::' + tabId; }
 function getContentBounds() {
-  if (!mainWindow) return { x: SIDEBAR_WIDTH, y: 0, width: 800, height: 600 };
+  if (!mainWindow) return { x: SIDEBAR_WIDTH, y: TOOLBAR_HEIGHT, width: 800, height: 600 };
   const [width, height] = mainWindow.getContentSize();
-  return { x: SIDEBAR_WIDTH, y: 0, width: Math.max(200, width - SIDEBAR_WIDTH), height: Math.max(200, height) };
+  return { x: SIDEBAR_WIDTH, y: TOOLBAR_HEIGHT, width: Math.max(200, width - SIDEBAR_WIDTH), height: Math.max(150, height - TOOLBAR_HEIGHT) };
+}
+function getActiveTabAndView() {
+  const inst = state.instances.find((i) => i.instanceId === state.activeId);
+  if (!inst || !inst.tabs || !inst.tabs.length) return {};
+  const tab = inst.tabs.find((t) => t.id === inst.activeTabId) || inst.tabs[0];
+  return { inst, tab, view: views[tabKey(inst.instanceId, tab.id)] || null };
 }
 function relayout() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const view = state.activeId ? views[state.activeId] : null;
+  const { view } = getActiveTabAndView();
   if (!view || overlayOpen) return;
   view.setBounds(getContentBounds());
   view.setAutoResize({ width: true, height: true });
@@ -53,18 +110,33 @@ function relayout() {
 function hideActiveView() { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBrowserView(null); }
 function showActiveView() {
   if (overlayOpen) return;
-  const view = state.activeId ? views[state.activeId] : null;
+  const { view } = getActiveTabAndView();
   if (view && mainWindow && !mainWindow.isDestroyed()) { mainWindow.setBrowserView(view); relayout(); }
 }
-function createViewForInstance(instance) {
-  if (views[instance.instanceId]) return views[instance.instanceId];
-  const view = new BrowserView({ webPreferences: { partition: 'persist:' + instance.instanceId, contextIsolation: true, sandbox: true, nodeIntegration: false } });
+function pushTabNav(instanceId, tab, wc) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('tab-nav-update', { instanceId, tabId: tab.id, url: tab.url, title: tab.title, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward(), loading: wc.isLoading() });
+  } catch {}
+}
+function createViewForTab(instance, tab) {
+  const key = tabKey(instance.instanceId, tab.id);
+  if (views[key]) return views[key];
+  const partition = 'persist:' + instance.instanceId;
+  const view = new BrowserView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false } });
   const wc = view.webContents;
   wc.setUserAgent(CHROME_UA);
   wc.setWindowOpenHandler(({ url }) => { if (isSafeHttpUrl(url)) wc.loadURL(url); return { action: 'deny' }; });
-  const persistUrl = () => { try { instance.url = wc.getURL(); saveStateSoon(); } catch {} };
-  wc.on('did-navigate', persistUrl);
-  wc.on('did-navigate-in-page', persistUrl);
+  applyPrivacyHeaders(partition, wc.session);
+  attachBlockerToPartition(partition, view);
+  const onNav = () => {
+    try { tab.url = wc.getURL(); if (instance.tabs[0] === tab) instance.url = tab.url; tab.title = wc.getTitle() || tab.title; saveStateSoon(); pushTabNav(instance.instanceId, tab, wc); } catch {}
+  };
+  wc.on('did-navigate', onNav);
+  wc.on('did-navigate-in-page', onNav);
+  wc.on('page-title-updated', (_e, title) => { tab.title = title; saveStateSoon(); pushTabNav(instance.instanceId, tab, wc); });
+  wc.on('did-start-loading', () => pushTabNav(instance.instanceId, tab, wc));
+  wc.on('did-stop-loading', () => pushTabNav(instance.instanceId, tab, wc));
   wc.on('context-menu', (_e, params) => {
     Menu.buildFromTemplate([
       { label: 'بازگشت', enabled: wc.canGoBack(), click: () => wc.goBack() },
@@ -77,19 +149,23 @@ function createViewForInstance(instance) {
       { label: 'کپی آدرس', click: () => clipboard.writeText(wc.getURL()) }
     ]).popup({ window: mainWindow });
   });
-  if (isSafeHttpUrl(instance.url)) wc.loadURL(instance.url);
-  views[instance.instanceId] = view;
+  if (isSafeHttpUrl(tab.url)) wc.loadURL(tab.url);
+  views[key] = view;
   return view;
 }
 function switchTo(instanceId) {
   if (!instanceId || overlayOpen) { state.activeId = instanceId || state.activeId; saveStateSoon(); sendUi(); return; }
   const inst = state.instances.find((i) => i.instanceId === instanceId);
   if (!inst) return;
-  const view = createViewForInstance(inst);
+  if (!Array.isArray(inst.tabs) || !inst.tabs.length) { inst.tabs = [{ id: 'tab-1', url: inst.url, title: inst.label }]; inst.activeTabId = 'tab-1'; }
+  if (!inst.activeTabId || !inst.tabs.some((t) => t.id === inst.activeTabId)) inst.activeTabId = inst.tabs[0].id;
+  const tab = inst.tabs.find((t) => t.id === inst.activeTabId);
+  const view = createViewForTab(inst, tab);
   mainWindow.setBrowserView(view);
   state.activeId = instanceId;
   saveStateSoon();
   relayout(); setTimeout(relayout, 80); setTimeout(relayout, 250);
+  pushTabNav(instanceId, tab, view.webContents);
   sendUi();
 }
 function sendUi() {
@@ -128,18 +204,64 @@ function setupIpc() {
     if (payload.custom) { if (!isSafeHttpUrl(payload.url)) return; appId = 'custom'; url = payload.url; name = payload.label || new URL(payload.url).hostname; }
     else if (!appDef) return; else url = appDef.url;
     const instanceId = uniqueId(appId);
-    const instance = { instanceId, appId, label: (payload.label && String(payload.label).trim()) || name, color, url, folderId: null };
+    const instance = { instanceId, appId, label: (payload.label && String(payload.label).trim()) || name, color, url, folderId: null, tabs: [{ id: 'tab-1', url, title: (payload.label && String(payload.label).trim()) || name }], activeTabId: 'tab-1' };
     state.instances.push(instance); state.order.push(instanceId); saveStateSoon(); overlayOpen = false; switchTo(instanceId);
   });
   ipcMain.on('remove-instance', async (_e, instanceId) => {
-    const view = views[instanceId];
-    if (view) { try { await view.webContents.session.clearStorageData(); } catch {} try { view.webContents.close(); } catch {} delete views[instanceId]; }
+    const inst = state.instances.find((i) => i.instanceId === instanceId);
+    const tabIds = inst && Array.isArray(inst.tabs) ? inst.tabs.map((t) => t.id) : [];
+    for (const tabId of tabIds) {
+      const key = tabKey(instanceId, tabId);
+      const view = views[key];
+      if (view) { try { if (mainWindow.getBrowserView() === view) mainWindow.setBrowserView(null); await view.webContents.session.clearStorageData(); } catch {} try { view.webContents.close(); } catch {} delete views[key]; }
+    }
     state.instances = state.instances.filter((i) => i.instanceId !== instanceId);
     state.order = state.order.filter((id) => id !== instanceId);
     state.folders.forEach((f) => { f.itemIds = (f.itemIds || []).filter((id) => id !== instanceId); });
     if (state.activeId === instanceId) state.activeId = state.instances[0] ? state.instances[0].instanceId : null;
     saveStateSoon(); if (state.activeId) switchTo(state.activeId); else { hideActiveView(); sendUi(); }
   });
+  ipcMain.on('new-tab', (_e, instanceId) => {
+    const inst = state.instances.find((i) => i.instanceId === instanceId);
+    if (!inst) return;
+    const appDef = catalog.find((a) => a.appId === inst.appId);
+    const url = (appDef && appDef.url) || 'https://www.google.com';
+    const id = 'tab-' + Date.now();
+    inst.tabs = inst.tabs || [];
+    inst.tabs.push({ id, url, title: 'برگه جدید' });
+    inst.activeTabId = id;
+    saveStateSoon();
+    if (state.activeId === instanceId) switchTo(instanceId); else sendUi();
+  });
+  ipcMain.on('close-tab', (_e, { instanceId, tabId }) => {
+    const inst = state.instances.find((i) => i.instanceId === instanceId);
+    if (!inst || !inst.tabs || inst.tabs.length <= 1) return;
+    const idx = inst.tabs.findIndex((t) => t.id === tabId);
+    if (idx === -1) return;
+    const key = tabKey(instanceId, tabId);
+    const view = views[key];
+    if (view) { try { if (mainWindow.getBrowserView() === view) mainWindow.setBrowserView(null); view.webContents.close(); } catch {} delete views[key]; }
+    inst.tabs.splice(idx, 1);
+    if (inst.activeTabId === tabId) inst.activeTabId = inst.tabs[Math.max(0, idx - 1)].id;
+    saveStateSoon();
+    if (state.activeId === instanceId) switchTo(instanceId); else sendUi();
+  });
+  ipcMain.on('switch-tab', (_e, { instanceId, tabId }) => {
+    const inst = state.instances.find((i) => i.instanceId === instanceId);
+    if (!inst || !inst.tabs || !inst.tabs.some((t) => t.id === tabId)) return;
+    inst.activeTabId = tabId;
+    saveStateSoon();
+    if (state.activeId === instanceId) switchTo(instanceId); else sendUi();
+  });
+  ipcMain.on('navigate', (_e, { instanceId, tabId, url }) => {
+    const view = views[tabKey(instanceId, tabId)];
+    const target = normalizeAddress(url);
+    if (!view || !target || !isSafeHttpUrl(target)) return;
+    view.webContents.loadURL(target);
+  });
+  ipcMain.on('nav-back', (_e, { instanceId, tabId }) => { const v = views[tabKey(instanceId, tabId)]; if (v && v.webContents.canGoBack()) v.webContents.goBack(); });
+  ipcMain.on('nav-forward', (_e, { instanceId, tabId }) => { const v = views[tabKey(instanceId, tabId)]; if (v && v.webContents.canGoForward()) v.webContents.goForward(); });
+  ipcMain.on('nav-reload', (_e, { instanceId, tabId }) => { const v = views[tabKey(instanceId, tabId)]; if (v) v.webContents.reload(); });
   ipcMain.on('rename-instance', (_e, { instanceId, label }) => { const inst = state.instances.find((i) => i.instanceId === instanceId); if (!inst || !label) return; inst.label = String(label).slice(0, 40); saveStateSoon(); sendUi(); });
   ipcMain.on('create-folder', (_e, name) => { state.folders.push({ id: 'folder-' + Date.now(), name: (name && String(name).slice(0, 40)) || 'پوشه', itemIds: [], open: true }); saveStateSoon(); sendUi(); });
   ipcMain.on('rename-folder', (_e, { folderId, name }) => { const f = state.folders.find((x) => x.id === folderId); if (!f || !name) return; f.name = String(name).slice(0, 40); saveStateSoon(); sendUi(); });
@@ -238,6 +360,7 @@ app.whenReady().then(() => {
   setupIpc();
   attachNativeMenus(() => ({ state, mainWindow, refresh: sendUi }));
   createWindow();
+  initAdblock();
 
   setInterval(() => {
     const minutes = (state.settings && state.settings.autoLockMinutes) || 0;

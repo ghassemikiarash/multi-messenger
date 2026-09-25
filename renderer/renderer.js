@@ -156,6 +156,70 @@ function renderSettings(tab) {
   }
 }
 
+function activeInstance() { return (ui.instances || []).find((i) => i.instanceId === ui.activeId); }
+function activeTabOf(inst) { if (!inst || !inst.tabs || !inst.tabs.length) return null; return inst.tabs.find((t) => t.id === inst.activeTabId) || inst.tabs[0]; }
+
+function renderTabStrip() {
+  const strip = $('tabStrip');
+  if (!strip) return;
+  strip.innerHTML = '';
+  const inst = activeInstance();
+  if (!inst) return;
+  (inst.tabs || []).forEach((t) => {
+    const chip = document.createElement('div');
+    chip.className = 'tab-chip' + (t.id === inst.activeTabId ? ' active' : '');
+    const titleEl = document.createElement('span');
+    titleEl.className = 't-title';
+    titleEl.textContent = t.title || t.url || 'برگه';
+    chip.appendChild(titleEl);
+    if (inst.tabs.length > 1) {
+      const closeEl = document.createElement('span');
+      closeEl.className = 't-close';
+      closeEl.innerHTML = '&times;';
+      closeEl.onclick = (e) => { e.stopPropagation(); window.api.closeTab(inst.instanceId, t.id); };
+      chip.appendChild(closeEl);
+    }
+    chip.onclick = () => window.api.switchTab(inst.instanceId, t.id);
+    strip.appendChild(chip);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.className = 'tab-new';
+  addBtn.textContent = '+';
+  addBtn.title = 'برگه جدید';
+  addBtn.onclick = () => window.api.newTab(inst.instanceId);
+  strip.appendChild(addBtn);
+}
+
+function renderToolbar() {
+  renderTabStrip();
+  const inst = activeInstance();
+  const tab = activeTabOf(inst);
+  if (!$('addressBar')) return;
+  if (!inst || !tab) { $('addressBar').value = ''; $('navBack').disabled = true; $('navForward').disabled = true; return; }
+  if (document.activeElement !== $('addressBar')) $('addressBar').value = tab.url || '';
+}
+
+if ($('navBack')) $('navBack').onclick = () => { const inst = activeInstance(); const tab = activeTabOf(inst); if (inst && tab) window.api.navBack(inst.instanceId, tab.id); };
+if ($('navForward')) $('navForward').onclick = () => { const inst = activeInstance(); const tab = activeTabOf(inst); if (inst && tab) window.api.navForward(inst.instanceId, tab.id); };
+if ($('navReload')) $('navReload').onclick = () => { const inst = activeInstance(); const tab = activeTabOf(inst); if (inst && tab) window.api.navReload(inst.instanceId, tab.id); };
+if ($('addressBar')) $('addressBar').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const inst = activeInstance(); const tab = activeTabOf(inst);
+  if (inst && tab) window.api.navigate(inst.instanceId, tab.id, $('addressBar').value);
+  $('addressBar').blur();
+});
+
+if (window.api.onTabNavUpdate) window.api.onTabNavUpdate((data) => {
+  const inst = activeInstance();
+  if (!inst || inst.instanceId !== data.instanceId) return;
+  if (inst.activeTabId === data.tabId) {
+    $('navBack').disabled = !data.canGoBack;
+    $('navForward').disabled = !data.canGoForward;
+    if (document.activeElement !== $('addressBar')) $('addressBar').value = data.url || '';
+  }
+  renderTabStrip();
+});
+
 if ($('btnAdd')) $('btnAdd').onclick = renderAddDrawer;
 if ($('btnLock')) $('btnLock').onclick = () => {
   if (ui.lockEnabled) window.api.lockNow();
@@ -175,8 +239,8 @@ window.api.onBoot((data) => {
 });
 window.api.onNeedLock(() => { hideView(); $('lockScreen').classList.remove('hidden'); });
 if (window.api.onOpenSettings) window.api.onOpenSettings((tab) => renderSettings(tab || 'lock'));
-window.api.onUi((data) => { ui = data; renderSidebar(); });
-window.api.getUi().then((data) => { ui = data; renderSidebar(); });
+window.api.onUi((data) => { ui = data; renderSidebar(); renderToolbar(); });
+window.api.getUi().then((data) => { ui = data; renderSidebar(); renderToolbar(); });
 
 if (window.api.onAskRename) {
   window.api.onAskRename((payload) => {
