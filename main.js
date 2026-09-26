@@ -4,6 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const attachNativeMenus = require('./native-menus');
+const { createWallet } = require('./wallet');
+let wallet = null;
 let ElectronBlocker = null;
 try { ElectronBlocker = require('@ghostery/adblocker-electron').ElectronBlocker; } catch { ElectronBlocker = null; }
 
@@ -123,7 +125,7 @@ function createViewForTab(instance, tab) {
   const key = tabKey(instance.instanceId, tab.id);
   if (views[key]) return views[key];
   const partition = 'persist:' + instance.instanceId;
-  const view = new BrowserView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  const view = new BrowserView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'renderer', 'wallet-preload.js') } });
   const wc = view.webContents;
   wc.setUserAgent(CHROME_UA);
   wc.setWindowOpenHandler(({ url }) => { if (isSafeHttpUrl(url)) wc.loadURL(url); return { action: 'deny' }; });
@@ -351,12 +353,36 @@ function setupIpc() {
     } catch (e) { return { ok: false, error: 'خطا در بروزرسانی' }; }
   });
   ipcMain.on('open-external', (_e, url) => { if (isSafeHttpUrl(url)) shell.openExternal(url); });
+
+  ipcMain.handle('wallet-request', async (_e, req) => {
+    try { return { result: await wallet.handleRequest(req) }; }
+    catch (err) { return { error: { code: err.code || -32603, message: err.message || 'خطای ولت' } }; }
+  });
+  ipcMain.on('wallet-confirm-response', (_e, { id, approved }) => wallet.resolveConfirm(id, approved));
+  ipcMain.handle('wallet-get-state', () => wallet.getPublicState());
+  ipcMain.handle('wallet-import-key', (_e, pk) => {
+    try { return { ok: true, address: wallet.importPrivateKey(pk) }; }
+    catch (e) { return { ok: false, error: 'کلید خصوصی نامعتبر است' }; }
+  });
+  ipcMain.handle('wallet-remove', () => { wallet.removeWallet(); return { ok: true }; });
+  ipcMain.handle('wallet-reveal-key', () => ({ key: wallet.revealPrivateKey() }));
+  ipcMain.handle('wallet-set-chain', (_e, chainId) => { wallet.setChain(chainId); return wallet.getPublicState(); });
+  ipcMain.handle('wallet-set-autosign', (_e, { chainId, value }) => { wallet.setAutoSign(chainId, value); return wallet.getPublicState(); });
+  ipcMain.handle('wallet-set-gascap', (_e, gwei) => { wallet.setGasCap(gwei); return wallet.getPublicState(); });
+  ipcMain.handle('wallet-is-testnet', (_e, chainId) => wallet.isTestnet(chainId));
 }
 app.whenReady().then(() => {
   userDataPath = app.getPath('userData');
   statePath = path.join(userDataPath, 'state.json');
   lockPath = path.join(userDataPath, 'lock.json');
   state = loadState();
+  wallet = createWallet({
+    userDataPath,
+    getMainWindow: () => mainWindow,
+    broadcastToPages: (event, data) => {
+      Object.values(views).forEach((v) => { try { if (!v.webContents.isDestroyed()) v.webContents.send('wallet-event', { event, data }); } catch {} });
+    },
+  });
   setupIpc();
   attachNativeMenus(() => ({ state, mainWindow, refresh: sendUi }));
   createWindow();

@@ -286,6 +286,7 @@ select {
   z-index: 15;
   display: flex;
   flex-direction: column;
+  direction: ltr;
 }
 .tabstrip {
   height: 36px;
@@ -361,3 +362,28 @@ select {
   text-align: left;
 }
 .address-bar:focus { outline: none; border-color: var(--accent); }
+
+.addr { font-family: monospace; font-size: 12px; background: #0f1115; padding: 3px 8px; border-radius: 8px; word-break: break-all; }
+.wnet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.wnet-row i { color: var(--muted); font-style: normal; font-size: 11px; }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: #2a303d; border-radius: 22px; transition: .15s ease;
+}
+.switch .slider::before {
+  content: ""; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: .15s ease;
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+.ghost.danger { color: var(--danger); border-color: var(--danger); }
+.ghost.danger:hover { background: rgba(255, 90, 90, .12); }

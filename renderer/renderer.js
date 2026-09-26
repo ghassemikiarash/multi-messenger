@@ -220,6 +220,71 @@ if (window.api.onTabNavUpdate) window.api.onTabNavUpdate((data) => {
   renderTabStrip();
 });
 
+async function renderWallet() {
+  const st = await window.api.walletGetState();
+  let body;
+  if (!st.address) {
+    body = '<h3>ولت داخلی</h3><p class="muted">هنوز ولتی وصل نشده.</p><label>کلید خصوصی</label><input id="pkInput" type="password" placeholder="0x..." /><button class="primary" id="importKeyBtn">وارد کردن کلید</button><p id="importErr" class="error"></p><p class="muted" style="margin-top:14px">⚠️ کلید خصوصی فقط روی همین سیستم و به‌صورت رمزنگاری‌شده (با رمزنگاری سطح سیستم‌عامل ویندوز) ذخیره می‌شود و هیچ‌جای دیگری ارسال نمی‌شود. آن را با کسی به اشتراک نگذارید.</p>';
+  } else {
+    const netRows = st.networks.map((n) => {
+      const on = !!st.autoSign[n.chainId];
+      return '<div class="wnet-row"><span>' + n.name + (n.testnet ? ' <i>(تست‌نت)</i>' : '') + '</span><label class="switch"><input type="checkbox" data-chain="' + n.chainId + '" class="autoSignChk" ' + (on ? 'checked' : '') + ' /><span class="slider"></span></label></div>';
+    }).join('');
+    body = '<h3>ولت داخلی</h3><p>آدرس: <code class="addr">' + st.address + '</code></p><label>سقف قیمت گس (gwei) — خالی یعنی بدون سقف</label><input id="gasCapInput" type="number" min="0" placeholder="مثلاً 30" value="' + (st.gasCapGwei || '') + '" /><h3 style="margin-top:16px">امضای خودکار به تفکیک شبکه</h3><p class="muted">وقتی روشنه، تراکنش‌های همون شبکه بدون تاییدیه امضا میشن (مگر گس بالاتر از سقف باشه). پیش‌فرض خاموشه.</p><div id="walletNets">' + netRows + '</div><button class="ghost" id="revealKeyBtn" style="margin-top:14px">نمایش کلید خصوصی</button><button class="ghost danger" id="removeWalletBtn">حذف ولت</button>';
+  }
+  openModal('<div class="tabs"><button class="on">ولت</button></div><div>' + body + '</div><button class="ghost" id="closeSet">بستن</button>');
+  $('closeSet').onclick = closeModal;
+  if (!st.address) {
+    $('importKeyBtn').onclick = async () => {
+      const r = await window.api.walletImportKey($('pkInput').value);
+      if (r.ok) renderWallet(); else $('importErr').textContent = r.error;
+    };
+  } else {
+    $('gasCapInput').onchange = () => window.api.walletSetGasCap($('gasCapInput').value ? Number($('gasCapInput').value) : null);
+    document.querySelectorAll('.autoSignChk').forEach((chk) => {
+      chk.onchange = async () => {
+        const chainId = Number(chk.dataset.chain);
+        if (chk.checked) {
+          const isTestnet = await window.api.walletIsTestnet(chainId);
+          if (!isTestnet) {
+            const ok = confirm('این شبکه mainnet واقعیه — با روشن کردن امضای خودکار، دیگه هیچ تاییدیه‌ای قبل از تراکنش‌های این شبکه نمی‌بینی. مطمئنی؟');
+            if (!ok) { chk.checked = false; return; }
+          }
+        }
+        await window.api.walletSetAutoSign(chainId, chk.checked);
+      };
+    });
+    $('revealKeyBtn').onclick = async () => {
+      const r = await window.api.walletRevealKey();
+      if (r.key) alert('کلید خصوصی شما:\n' + r.key + '\n\nهرگز این را با کسی به اشتراک نگذارید.');
+    };
+    $('removeWalletBtn').onclick = async () => {
+      if (confirm('ولت حذف بشه؟ اگر جای دیگری از این کلید بکاپ نگرفته باشید، دیگر قابل بازیابی نیست.')) {
+        await window.api.walletRemove(); renderWallet();
+      }
+    };
+  }
+}
+if ($('btnWallet')) $('btnWallet').onclick = renderWallet;
+
+if (window.api.onWalletConfirmRequest) window.api.onWalletConfirmRequest((req) => {
+  let body;
+  if (req.kind === 'connect') {
+    body = '<h3>درخواست اتصال ولت</h3><p>سایت <b>' + req.origin + '</b> می‌خواهد به آدرس ولت شما دسترسی داشته باشد.</p>';
+  } else if (req.kind === 'tx') {
+    let valueEth = '0';
+    try { valueEth = (Number(BigInt(req.valueWei || '0x0')) / 1e18).toString(); } catch {}
+    body = '<h3>تایید تراکنش</h3><p>از سایت: <b>' + req.origin + '</b></p><p>شبکه: ' + req.netName + '</p><p>به آدرس: <code class="addr">' + req.to + '</code></p><p>مقدار: ' + valueEth + ' ' + (req.symbol || '') + '</p><p>قیمت گس فعلی: ' + req.gasPriceGwei + ' gwei' + (req.overCap ? ' <b style="color:#ff6b6b">(بالاتر از سقفی که تعیین کرده‌اید)</b>' : '') + '</p>';
+  } else if (req.kind === 'sign') {
+    body = '<h3>تایید امضای پیام</h3><p>از سایت: <b>' + req.origin + '</b></p><p style="word-break:break-all">' + String(req.message || '') + '</p>';
+  } else {
+    body = '<h3>تایید امضا</h3><p>سایت <b>' + req.origin + '</b> درخواست امضای داده ساخت‌یافته (Typed Data) دارد.</p>';
+  }
+  openModal(body + '<button class="primary" id="waApprove">تایید</button><button class="ghost" id="waReject">رد</button>');
+  $('waApprove').onclick = () => { window.api.walletConfirmResponse(req.id, true); closeModal(); };
+  $('waReject').onclick = () => { window.api.walletConfirmResponse(req.id, false); closeModal(); };
+});
+
 if ($('btnAdd')) $('btnAdd').onclick = renderAddDrawer;
 if ($('btnLock')) $('btnLock').onclick = () => {
   if (ui.lockEnabled) window.api.lockNow();

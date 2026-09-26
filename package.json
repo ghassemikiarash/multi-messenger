@@ -1,6 +1,6 @@
 {
   "name": "multi-messenger",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "All-in-one desktop messenger — free, open source",
   "main": "main.js",
   "author": "Kiarash Ghassemi",
@@ -10,7 +10,8 @@
     "build": "electron-builder --win nsis"
   },
   "dependencies": {
-    "@ghostery/adblocker-electron": "^2.18.2"
+    "@ghostery/adblocker-electron": "^2.18.2",
+    "ethers": "^6.17.0"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -24,6 +25,7 @@
       "main.js",
       "preload.js",
       "native-menus.js",
+      "wallet.js",
       "catalog.json",
       "renderer/**/*",
       "icons/**/*"
