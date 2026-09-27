@@ -17,13 +17,17 @@ const BUILTIN_NETWORKS = [
 
 function providerError(code, message) { const e = new Error(message); e.code = code; return e; }
 
-function createWallet({ userDataPath, getMainWindow, broadcastToPages }) {
+const pendingConfirms = {};
+function resolveConfirm(id, approved) {
+  if (pendingConfirms[id]) { pendingConfirms[id](approved); delete pendingConfirms[id]; }
+}
+
+function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broadcastToPages }) {
   const settingsPath = path.join(userDataPath, 'wallet-settings.json');
   const keyPath = path.join(userDataPath, 'wallet-key.enc');
   let signer = null;
   let settings = { chainId: 1, networks: [], autoSign: {}, gasCapGwei: null, approvedOrigins: [] };
   const providersCache = {};
-  const pendingConfirms = {};
 
   function loadSettings() {
     try {
@@ -87,12 +91,9 @@ function createWallet({ userDataPath, getMainWindow, broadcastToPages }) {
       const id = 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
       pendingConfirms[id] = resolve;
       const mw = getMainWindow();
-      if (mw && !mw.isDestroyed()) mw.webContents.send('wallet-confirm-request', { id, ...payload });
+      if (mw && !mw.isDestroyed()) mw.webContents.send('wallet-confirm-request', { id, instanceId, profileLabel: getLabel ? getLabel() : instanceId, ...payload });
       else resolve(false);
     });
-  }
-  function resolveConfirm(id, approved) {
-    if (pendingConfirms[id]) { pendingConfirms[id](approved); delete pendingConfirms[id]; }
   }
 
   async function handleRequest({ origin, method, params }) {
@@ -176,7 +177,6 @@ function createWallet({ userDataPath, getMainWindow, broadcastToPages }) {
 
   return {
     handleRequest,
-    resolveConfirm,
     importPrivateKey,
     removeWallet,
     revealPrivateKey,
@@ -195,4 +195,4 @@ function createWallet({ userDataPath, getMainWindow, broadcastToPages }) {
   };
 }
 
-module.exports = { createWallet, BUILTIN_NETWORKS };
+module.exports = { createWallet, resolveConfirm, BUILTIN_NETWORKS };

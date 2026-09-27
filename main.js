@@ -4,8 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const attachNativeMenus = require('./native-menus');
-const { createWallet } = require('./wallet');
-let wallet = null;
+const { createWallet, resolveConfirm } = require('./wallet');
+const walletManager = new Map(); // instanceId -> wallet instance, fully isolated per profile
 let ElectronBlocker = null;
 try { ElectronBlocker = require('@ghostery/adblocker-electron').ElectronBlocker; } catch { ElectronBlocker = null; }
 
@@ -91,6 +91,25 @@ function normalizeAddress(input) {
   return 'https://www.google.com/search?q=' + encodeURIComponent(s);
 }
 function tabKey(instanceId, tabId) { return instanceId + '::' + tabId; }
+function getOrCreateWallet(instanceId) {
+  if (walletManager.has(instanceId)) return walletManager.get(instanceId);
+  const dir = path.join(userDataPath, 'wallets', instanceId);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const w = createWallet({
+    instanceId,
+    getLabel: () => { const inst = state.instances.find((i) => i.instanceId === instanceId); return inst ? inst.label : instanceId; },
+    userDataPath: dir,
+    getMainWindow: () => mainWindow,
+    broadcastToPages: (event, data) => {
+      Object.entries(views).forEach(([key, v]) => {
+        if (!key.startsWith(instanceId + '::')) return;
+        try { if (!v.webContents.isDestroyed()) v.webContents.send('wallet-event', { event, data }); } catch {}
+      });
+    },
+  });
+  walletManager.set(instanceId, w);
+  return w;
+}
 function getContentBounds() {
   if (!mainWindow) return { x: SIDEBAR_WIDTH, y: TOOLBAR_HEIGHT, width: 800, height: 600 };
   const [width, height] = mainWindow.getContentSize();
@@ -125,7 +144,7 @@ function createViewForTab(instance, tab) {
   const key = tabKey(instance.instanceId, tab.id);
   if (views[key]) return views[key];
   const partition = 'persist:' + instance.instanceId;
-  const view = new BrowserView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'renderer', 'wallet-preload.js') } });
+  const view = new BrowserView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'renderer', 'wallet-preload.js'), additionalArguments: ['--mm-instance-id=' + instance.instanceId] } });
   const wc = view.webContents;
   wc.setUserAgent(CHROME_UA);
   wc.setWindowOpenHandler(({ url }) => { if (isSafeHttpUrl(url)) wc.loadURL(url); return { action: 'deny' }; });
@@ -355,34 +374,28 @@ function setupIpc() {
   ipcMain.on('open-external', (_e, url) => { if (isSafeHttpUrl(url)) shell.openExternal(url); });
 
   ipcMain.handle('wallet-request', async (_e, req) => {
-    try { return { result: await wallet.handleRequest(req) }; }
+    if (!req || !req.instanceId) return { error: { code: -32602, message: 'شناسه پروفایل نامعتبر است' } };
+    try { return { result: await getOrCreateWallet(req.instanceId).handleRequest(req) }; }
     catch (err) { return { error: { code: err.code || -32603, message: err.message || 'خطای ولت' } }; }
   });
-  ipcMain.on('wallet-confirm-response', (_e, { id, approved }) => wallet.resolveConfirm(id, approved));
-  ipcMain.handle('wallet-get-state', () => wallet.getPublicState());
-  ipcMain.handle('wallet-import-key', (_e, pk) => {
-    try { return { ok: true, address: wallet.importPrivateKey(pk) }; }
-    catch (e) { return { ok: false, error: 'کلید خصوصی نامعتبر است' }; }
+  ipcMain.on('wallet-confirm-response', (_e, { id, approved }) => resolveConfirm(id, approved));
+  ipcMain.handle('wallet-get-state', (_e, instanceId) => getOrCreateWallet(instanceId).getPublicState());
+  ipcMain.handle('wallet-import-key', (_e, { instanceId, pk }) => {
+    try { return { ok: true, address: getOrCreateWallet(instanceId).importPrivateKey(pk) }; }
+    catch { return { ok: false, error: 'کلید خصوصی نامعتبر است' }; }
   });
-  ipcMain.handle('wallet-remove', () => { wallet.removeWallet(); return { ok: true }; });
-  ipcMain.handle('wallet-reveal-key', () => ({ key: wallet.revealPrivateKey() }));
-  ipcMain.handle('wallet-set-chain', (_e, chainId) => { wallet.setChain(chainId); return wallet.getPublicState(); });
-  ipcMain.handle('wallet-set-autosign', (_e, { chainId, value }) => { wallet.setAutoSign(chainId, value); return wallet.getPublicState(); });
-  ipcMain.handle('wallet-set-gascap', (_e, gwei) => { wallet.setGasCap(gwei); return wallet.getPublicState(); });
-  ipcMain.handle('wallet-is-testnet', (_e, chainId) => wallet.isTestnet(chainId));
+  ipcMain.handle('wallet-remove', (_e, instanceId) => { getOrCreateWallet(instanceId).removeWallet(); return { ok: true }; });
+  ipcMain.handle('wallet-reveal-key', (_e, instanceId) => ({ key: getOrCreateWallet(instanceId).revealPrivateKey() }));
+  ipcMain.handle('wallet-set-chain', (_e, { instanceId, chainId }) => { getOrCreateWallet(instanceId).setChain(chainId); return getOrCreateWallet(instanceId).getPublicState(); });
+  ipcMain.handle('wallet-set-autosign', (_e, { instanceId, chainId, value }) => { getOrCreateWallet(instanceId).setAutoSign(chainId, value); return getOrCreateWallet(instanceId).getPublicState(); });
+  ipcMain.handle('wallet-set-gascap', (_e, { instanceId, gwei }) => { getOrCreateWallet(instanceId).setGasCap(gwei); return getOrCreateWallet(instanceId).getPublicState(); });
+  ipcMain.handle('wallet-is-testnet', (_e, { instanceId, chainId }) => getOrCreateWallet(instanceId).isTestnet(chainId));
 }
 app.whenReady().then(() => {
   userDataPath = app.getPath('userData');
   statePath = path.join(userDataPath, 'state.json');
   lockPath = path.join(userDataPath, 'lock.json');
   state = loadState();
-  wallet = createWallet({
-    userDataPath,
-    getMainWindow: () => mainWindow,
-    broadcastToPages: (event, data) => {
-      Object.values(views).forEach((v) => { try { if (!v.webContents.isDestroyed()) v.webContents.send('wallet-event', { event, data }); } catch {} });
-    },
-  });
   setupIpc();
   attachNativeMenus(() => ({ state, mainWindow, refresh: sendUi }));
   createWindow();

@@ -1,5 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+const instArg = process.argv.find((a) => a.startsWith('--mm-instance-id='));
+const instanceId = instArg ? instArg.slice('--mm-instance-id='.length) : null;
+
 const listeners = { accountsChanged: [], chainChanged: [], connect: [], disconnect: [] };
 
 ipcRenderer.on('wallet-event', (_e, { event, data }) => {
@@ -11,7 +14,7 @@ const provider = {
   isStatus: false,
   _metamask: { isUnlocked: async () => true },
   request: async ({ method, params }) => {
-    const res = await ipcRenderer.invoke('wallet-request', { origin: location.origin, method, params });
+    const res = await ipcRenderer.invoke('wallet-request', { instanceId, origin: location.origin, method, params });
     if (res && res.error) { const e = new Error(res.error.message); e.code = res.error.code; throw e; }
     return res ? res.result : undefined;
   },

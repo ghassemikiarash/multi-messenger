@@ -387,3 +387,34 @@ select {
 .switch input:checked + .slider::before { transform: translateX(18px); }
 .ghost.danger { color: var(--danger); border-color: var(--danger); }
 .ghost.danger:hover { background: rgba(255, 90, 90, .12); }
+
+.wallet-icon {
+  background: rgba(124, 92, 255, .12);
+  color: #b9a9ff;
+  font-size: 15px;
+}
+.wallet-icon:hover { background: rgba(124, 92, 255, .22); color: #fff; }
+
+.wallet-popup {
+  position: fixed;
+  top: 84px;
+  right: 20px;
+  width: 300px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  z-index: 45;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  direction: rtl;
+  font-size: 13px;
+}
+.wallet-popup h4 { margin: 0 0 6px; font-size: 14px; }
+.wallet-popup input { width: 100%; margin: 0 0 10px; padding: 9px 12px; background: #0f1115; border: 1px solid var(--line); border-radius: 10px; color: var(--text); font-size: 12.5px; }
+.wallet-popup button { width: 100%; margin-top: 6px; padding: 8px; border-radius: 10px; border: 0; cursor: pointer; font-size: 12.5px; }
+.wallet-popup .primary { background: var(--accent); color: #fff; }
+.wallet-popup .ghost { background: #1c212c; color: var(--text); }
+.wallet-popup .ghost.danger { color: var(--danger); }
+.wallet-popup .wnet-row { font-size: 12px; padding: 6px 0; }
