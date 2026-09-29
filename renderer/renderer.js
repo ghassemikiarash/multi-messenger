@@ -7,7 +7,8 @@ function showView() {
   const modalOpen = $('modal') && !$('modal').classList.contains('hidden');
   const drawerOpen = $('drawer') && !$('drawer').classList.contains('hidden');
   const lockOpen = $('lockScreen') && !$('lockScreen').classList.contains('hidden');
-  if (!modalOpen && !drawerOpen && !lockOpen) window.api.setOverlay(false);
+  const popupOpen = $('walletPopup') && !$('walletPopup').classList.contains('hidden');
+  if (!modalOpen && !drawerOpen && !lockOpen && !popupOpen) window.api.setOverlay(false);
 }
 
 function openModal(html) {
@@ -72,6 +73,9 @@ function renderSidebar() {
     btn.style.background = inst.color || '#7c5cff';
     btn.title = inst.label;
     btn.innerHTML = typeof iconSvg === 'function' ? iconSvg(inst.appId) : inst.label[0];
+    if ((inst.tabs || []).some((t) => !t.muted && ui.audio && ui.audio[inst.instanceId + '::' + t.id])) {
+      const dot = document.createElement('span'); dot.className = 'audio-dot'; dot.textContent = '\uD83D\uDD0A'; btn.appendChild(dot);
+    }
     btn.onclick = () => window.api.switchInstance(inst.instanceId);
     btn.oncontextmenu = (e) => {
       e.preventDefault();
@@ -171,6 +175,15 @@ function renderTabStrip() {
     const titleEl = document.createElement('span');
     titleEl.className = 't-title';
     titleEl.textContent = t.title || t.url || 'برگه';
+    const audible = !!(ui.audio && ui.audio[inst.instanceId + '::' + t.id]);
+    if (t.muted || audible) {
+      const au = document.createElement('span');
+      au.className = 't-audio' + (t.muted ? ' muted' : '');
+      au.textContent = t.muted ? '\uD83D\uDD07' : '\uD83D\uDD0A';
+      au.title = t.muted ? 'فعال‌سازی صدای این برگه' : 'بی‌صدا کردن این برگه';
+      au.onclick = (e) => { e.stopPropagation(); window.api.toggleMute(inst.instanceId, t.id); };
+      chip.appendChild(au);
+    }
     chip.appendChild(titleEl);
     if (inst.tabs.length > 1) {
       const closeEl = document.createElement('span');
@@ -192,8 +205,11 @@ function renderTabStrip() {
 
 function renderToolbar() {
   renderTabStrip();
+  renderBookmarksBar();
   const inst = activeInstance();
   const tab = activeTabOf(inst);
+  if (inst && inst.instanceId !== actBtnFor) { actBtnFor = inst.instanceId; refreshActivityButton(); }
+  updateStar();
   if (walletPopupInstanceId && (!inst || inst.instanceId !== walletPopupInstanceId)) closeWalletPopup();
   if (!$('addressBar')) return;
   if (!inst || !tab) { $('addressBar').value = ''; $('navBack').disabled = true; $('navForward').disabled = true; return; }
@@ -211,6 +227,8 @@ if ($('addressBar')) $('addressBar').addEventListener('keydown', (e) => {
 });
 
 if (window.api.onTabNavUpdate) window.api.onTabNavUpdate((data) => {
+  liveNav[data.instanceId + '::' + data.tabId] = { url: data.url, title: data.title };
+  updateStar();
   const inst = activeInstance();
   if (!inst || inst.instanceId !== data.instanceId) return;
   if (inst.activeTabId === data.tabId) {
@@ -222,7 +240,7 @@ if (window.api.onTabNavUpdate) window.api.onTabNavUpdate((data) => {
 });
 
 let walletPopupInstanceId = null;
-function closeWalletPopup() { const el = $('walletPopup'); if (el) { el.classList.add('hidden'); el.innerHTML = ''; } walletPopupInstanceId = null; }
+function closeWalletPopup() { const el = $('walletPopup'); if (el) { el.classList.add('hidden'); el.innerHTML = ''; } walletPopupInstanceId = null; showView(); }
 
 function renderWalletPopupBody(inst, st) {
   const popup = $('walletPopup');
@@ -256,6 +274,7 @@ function renderWalletPopupBody(inst, st) {
           }
         }
         await window.api.walletSetAutoSign(inst.instanceId, chainId, chk.checked);
+        refreshActivityButton();
       };
     });
     $('wpReveal').onclick = async () => {
@@ -281,6 +300,7 @@ async function toggleWalletPopup() {
   const st = await window.api.walletGetState(inst.instanceId);
   renderWalletPopupBody(inst, st);
   walletPopupInstanceId = inst.instanceId;
+  hideView();
   popup.classList.remove('hidden');
 }
 
@@ -336,7 +356,8 @@ window.api.getUi().then((data) => { ui = data; renderSidebar(); renderToolbar();
 
 if (window.api.onAskRename) {
   window.api.onAskRename((payload) => {
-    if (payload.type === 'instance') askName('تغییر نام', payload.value, (n) => window.api.renameInstance(payload.id, n));
+    if (payload.type === 'bookmark') askName('تغییر نام بوکمارک', payload.value, (n) => window.api.renameBookmark(payload.id, n));
+    else if (payload.type === 'instance') askName('تغییر نام', payload.value, (n) => window.api.renameInstance(payload.id, n));
     else askName('نام پوشه', payload.value, (n) => window.api.renameFolder(payload.id, n));
   });
 }
@@ -372,3 +393,201 @@ if (window.api.onUpdateAvailable) window.api.onUpdateAvailable(showUpdateToast);
     if (now - last > 10000) { last = now; window.api.ping(); }
   });
 });
+
+
+/* ======================= Bookmarks ======================= */
+const liveNav = {};
+let actBtnFor = null;
+
+function currentPage() {
+  const inst = activeInstance(); const tab = activeTabOf(inst);
+  if (!inst || !tab) return null;
+  const l = liveNav[inst.instanceId + '::' + tab.id];
+  return { url: (l && l.url) || tab.url, title: (l && l.title) || tab.title };
+}
+function updateStar() {
+  const btn = $('btnBookmark'); if (!btn) return;
+  const pg = currentPage();
+  const marked = !!(pg && (ui.bookmarks || []).some((b) => b.url === pg.url));
+  btn.innerHTML = marked ? '&#9733;' : '&#9734;';
+  btn.classList.toggle('starred', marked);
+  btn.title = marked ? 'حذف بوکمارک (Ctrl+D)' : 'افزودن بوکمارک (Ctrl+D)';
+}
+function toggleCurrentBookmark() {
+  const pg = currentPage();
+  if (pg && /^https?:\/\//i.test(pg.url || '')) window.api.toggleBookmark(pg.title, pg.url);
+}
+function bmColor(str) {
+  let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360;
+  return 'hsl(' + h + ',55%,48%)';
+}
+function renderBookmarksBar() {
+  const bar = $('bookmarksBar'); if (!bar) return;
+  const show = !(ui.settings && ui.settings.showBookmarksBar === false);
+  document.documentElement.style.setProperty('--toolbar-h', (show ? 112 : 78) + 'px');
+  bar.classList.toggle('hidden', !show);
+  if (!show) return;
+  bar.innerHTML = '';
+  const list = ui.bookmarks || [];
+  if (!list.length) {
+    const h = document.createElement('span'); h.className = 'bm-hint';
+    h.textContent = 'برای افزودن بوکمارک روی ☆ کنار نوار آدرس بزن (Ctrl+D)';
+    bar.appendChild(h);
+  }
+  list.forEach((b) => {
+    const chip = document.createElement('button'); chip.className = 'bm-chip'; chip.title = b.title + '\n' + b.url;
+    let host = b.url; try { host = new URL(b.url).hostname.replace(/^www\./, ''); } catch {}
+    const dot = document.createElement('span'); dot.className = 'bm-dot'; dot.style.background = bmColor(host);
+    dot.textContent = (b.title || host).trim().charAt(0).toUpperCase();
+    const name = document.createElement('span'); name.className = 'bm-name'; name.textContent = b.title;
+    chip.append(dot, name);
+    chip.onclick = (e) => window.api.openBookmark(b.url, e.ctrlKey || e.metaKey);
+    chip.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); window.api.openBookmark(b.url, true); } };
+    chip.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); window.api.bookmarkMenu(b.id); };
+    bar.appendChild(chip);
+  });
+  bar.oncontextmenu = (e) => { e.preventDefault(); window.api.bookmarksBarMenu(); };
+}
+if ($('btnBookmark')) $('btnBookmark').onclick = toggleCurrentBookmark;
+if (window.api.onShortcut) window.api.onShortcut((name) => {
+  if (name === 'bookmark') toggleCurrentBookmark();
+  else if (name === 'bookmarks-bar') window.api.toggleBookmarksBar();
+});
+document.addEventListener('keydown', (e) => {
+  if (!e.ctrlKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'd' && !e.shiftKey) { e.preventDefault(); toggleCurrentBookmark(); }
+  else if (k === 'b' && e.shiftKey) { e.preventDefault(); window.api.toggleBookmarksBar(); }
+});
+
+/* ======================= Per-tab audio ======================= */
+if (window.api.onTabAudio) window.api.onTabAudio(({ instanceId, tabId, audible }) => {
+  ui.audio = ui.audio || {};
+  ui.audio[instanceId + '::' + tabId] = audible;
+  renderSidebar();
+  const inst = activeInstance();
+  if (inst && inst.instanceId === instanceId) renderTabStrip();
+});
+
+/* ======================= Wallet activity side panel ======================= */
+let actOpen = false;
+let actList = [];
+const ACT_DEFAULT_PCT = 0.2;
+const KIND_LABEL = { tx: 'تراکنش', sign: 'امضای پیام', 'sign-typed': 'امضای داده (Typed)', connect: 'اتصال سایت', 'switch-chain': 'تغییر شبکه', 'add-chain': 'افزودن شبکه', rpc: 'درخواست RPC' };
+const STATUS_ICON = { ok: '\u2705', error: '\u274C', blocked: '\u26D4', rejected: '\u270B' };
+
+function actPct() { const p = ui.settings && ui.settings.activityPanelPct; return (typeof p === 'number' && p > 0.08 && p < 0.6) ? p : ACT_DEFAULT_PCT; }
+function applyActWidth(px) {
+  px = Math.max(220, Math.min(px, Math.round(window.innerWidth * 0.6)));
+  document.documentElement.style.setProperty('--act-w', px + 'px');
+  return px;
+}
+const shortStr = (a, h, t) => (a && a.length > h + t + 1) ? a.slice(0, h) + '…' + a.slice(-t) : (a || '');
+const hostOf = (o) => { try { return new URL(o).host; } catch { return o || ''; } };
+
+function actItemEl(e) {
+  const d = document.createElement('div'); d.className = 'act-item ' + (e.status || '');
+  const row = document.createElement('div'); row.className = 'act-row';
+  const kind = document.createElement('span'); kind.className = 'act-kind';
+  kind.textContent = (STATUS_ICON[e.status] || '•') + ' ' + (KIND_LABEL[e.kind] || e.kind);
+  if (e.auto) { const b = document.createElement('span'); b.className = 'act-badge'; b.textContent = 'خودکار'; kind.appendChild(b); }
+  const time = document.createElement('span'); time.className = 'act-time'; time.textContent = new Date(e.ts).toLocaleTimeString('en-GB');
+  row.append(kind, time); d.appendChild(row);
+  const meta = [];
+  if (e.netName) meta.push(e.netName);
+  if (e.value) meta.push(e.value);
+  if (e.to) meta.push('به ' + shortStr(e.to, 6, 4));
+  if (e.gasGwei) meta.push('گس ' + e.gasGwei + ' gwei');
+  if (e.kind === 'rpc' && e.method) meta.push(e.method);
+  if (e.origin) meta.push(hostOf(e.origin));
+  if (meta.length) { const m = document.createElement('div'); m.className = 'act-meta'; m.textContent = meta.join(' · '); d.appendChild(m); }
+  if (e.message) { const m = document.createElement('div'); m.className = 'act-msg'; m.textContent = e.message; d.appendChild(m); }
+  if (e.hash) {
+    const h = document.createElement('div'); h.className = 'act-hash'; h.textContent = shortStr(e.hash, 12, 8); h.title = 'کلیک: کپی هش تراکنش\n' + e.hash;
+    h.onclick = () => { try { navigator.clipboard.writeText(e.hash); h.textContent = 'کپی شد ✓'; setTimeout(() => { h.textContent = shortStr(e.hash, 12, 8); }, 1200); } catch {} };
+    d.appendChild(h);
+  }
+  return d;
+}
+function renderActivityList() {
+  const list = $('actList'); if (!list) return;
+  const f = $('actFilter').value;
+  let items = actList.slice().reverse();
+  if (f === 'bad') items = items.filter((x) => x.status === 'error' || x.status === 'blocked');
+  list.innerHTML = '';
+  if (!items.length) {
+    const em = document.createElement('div'); em.className = 'act-empty';
+    em.textContent = f === 'bad' ? 'هیچ خطایی ثبت نشده 👌' : 'هنوز فعالیتی ثبت نشده.\nوقتی سایتی تراکنش یا امضا بخواد، اینجا زنده می‌بینی.';
+    list.appendChild(em); return;
+  }
+  items.forEach((e) => list.appendChild(actItemEl(e)));
+}
+async function loadActivityForActive() {
+  const inst = activeInstance(); if (!inst) return;
+  $('actProfile').textContent = inst.label || '';
+  actList = (await window.api.walletGetActivity(inst.instanceId)) || [];
+  renderActivityList();
+}
+async function openActivityPanel() {
+  if (!activeInstance()) return;
+  actOpen = true;
+  $('activityPanel').classList.remove('hidden');
+  $('btnWalletActivity').classList.add('open'); $('btnWalletActivity').classList.remove('has-alert');
+  window.api.setRightPanel(applyActWidth(Math.round(window.innerWidth * actPct())));
+  await loadActivityForActive();
+}
+function closeActivityPanel() {
+  if (!actOpen) return;
+  actOpen = false;
+  $('activityPanel').classList.add('hidden');
+  $('btnWalletActivity').classList.remove('open');
+  window.api.setRightPanel(0);
+}
+async function refreshActivityButton() {
+  const btn = $('btnWalletActivity'); if (!btn) return;
+  const inst = activeInstance();
+  if (!inst) { btn.classList.add('hidden'); closeActivityPanel(); return; }
+  const st = await window.api.walletGetState(inst.instanceId);
+  const cur = activeInstance();
+  if (!cur || cur.instanceId !== inst.instanceId) return;           // profile changed meanwhile
+  const any = !!st.address && Object.values(st.autoSign || {}).some(Boolean);
+  btn.classList.toggle('hidden', !any);
+  if (!any) { btn.classList.remove('has-alert'); closeActivityPanel(); }
+  else if (actOpen) loadActivityForActive();
+}
+if ($('btnWalletActivity')) $('btnWalletActivity').onclick = () => (actOpen ? closeActivityPanel() : openActivityPanel());
+if ($('actClose')) $('actClose').onclick = closeActivityPanel;
+if ($('actFilter')) $('actFilter').onchange = renderActivityList;
+if ($('actClear')) $('actClear').onclick = async () => {
+  const inst = activeInstance(); if (!inst) return;
+  if (confirm('لاگ اکتیویتی این پروفایل پاک بشه؟')) { await window.api.walletClearActivity(inst.instanceId); actList = []; renderActivityList(); }
+};
+if (window.api.onWalletActivity) window.api.onWalletActivity(({ instanceId, entry }) => {
+  const inst = activeInstance();
+  if (!inst || inst.instanceId !== instanceId) return;
+  if (actOpen) { actList.push(entry); if (actList.length > 200) actList.shift(); renderActivityList(); }
+  else if (entry.status === 'error' || entry.status === 'blocked') { const b = $('btnWalletActivity'); if (b) b.classList.add('has-alert'); }
+});
+window.addEventListener('resize', () => { if (actOpen) window.api.setRightPanel(applyActWidth(Math.round(window.innerWidth * actPct()))); });
+
+// Drag the left edge to resize. The page view is hidden while dragging so mouse events reach this document.
+if ($('actResizer')) {
+  const rz = $('actResizer');
+  rz.addEventListener('mousedown', (e) => {
+    e.preventDefault(); rz.classList.add('drag'); hideView();
+    const move = (ev) => applyActWidth(window.innerWidth - ev.clientX);
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      rz.classList.remove('drag');
+      const px = parseInt(getComputedStyle($('activityPanel')).width, 10) || Math.round(window.innerWidth * ACT_DEFAULT_PCT);
+      window.api.setRightPanel(px);
+      window.api.saveSettings({ activityPanelPct: px / window.innerWidth });
+      showView();
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
+  rz.addEventListener('dblclick', () => {
+    window.api.saveSettings({ activityPanelPct: ACT_DEFAULT_PCT });
+    window.api.setRightPanel(applyActWidth(Math.round(window.innerWidth * ACT_DEFAULT_PCT)));
+  });
+}

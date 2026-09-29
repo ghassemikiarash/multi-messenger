@@ -96,7 +96,36 @@ function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broad
     });
   }
 
-  async function handleRequest({ origin, method, params }) {
+  const activityPath = path.join(userDataPath, 'wallet-activity.json');
+  let activity = [];
+  try { const a = JSON.parse(fs.readFileSync(activityPath, 'utf-8')); if (Array.isArray(a)) activity = a.slice(-200); } catch {}
+  const trunc = (m) => String(m || '').slice(0, 300);
+  function logActivity(entry) {
+    const e = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 6), ts: Date.now(), ...entry };
+    activity.push(e);
+    if (activity.length > 200) activity = activity.slice(-200);
+    try { fs.writeFileSync(activityPath, JSON.stringify(activity)); } catch {}
+    const mw = getMainWindow();
+    if (mw && !mw.isDestroyed()) mw.webContents.send('wallet-activity', { instanceId, entry: e });
+    return e;
+  }
+  function failLog(err, entry) {
+    logActivity({ status: err.code === 4001 ? 'rejected' : (err.blocked ? 'blocked' : 'error'), ...entry, message: trunc(err.shortMessage || err.message) });
+    err._logged = true;
+    return err;
+  }
+  const KIND = { eth_requestAccounts: 'connect', wallet_switchEthereumChain: 'switch-chain', wallet_addEthereumChain: 'add-chain', eth_sendTransaction: 'tx', personal_sign: 'sign', eth_signTypedData_v4: 'sign-typed' };
+  const fmtValue = (v, net) => { try { return ethers.formatEther(BigInt(v || '0x0')) + ' ' + (net ? net.symbol : ''); } catch { return ''; } };
+
+  async function handleRequest(req) {
+    try { return await handleRequestInner(req); }
+    catch (err) {
+      if (!err._logged) logActivity({ kind: KIND[req.method] || 'rpc', method: req.method, status: err.code === 4001 ? 'rejected' : 'error', origin: req.origin, message: trunc(err.shortMessage || err.message) });
+      throw err;
+    }
+  }
+
+  async function handleRequestInner({ origin, method, params }) {
     params = params || [];
     switch (method) {
       case 'eth_chainId': return '0x' + settings.chainId.toString(16);
@@ -106,8 +135,9 @@ function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broad
         if (!signer) throw providerError(4100, 'هیچ ولتی وصل نیست — از تنظیمات، کلید خصوصی وارد کنید');
         if (!settings.approvedOrigins.includes(origin)) {
           const ok = await openConfirm({ kind: 'connect', origin });
-          if (!ok) throw providerError(4001, 'کاربر درخواست اتصال را رد کرد');
+          if (!ok) throw failLog(providerError(4001, 'کاربر درخواست اتصال را رد کرد'), { kind: 'connect', origin });
           settings.approvedOrigins.push(origin); saveSettings();
+          logActivity({ kind: 'connect', status: 'ok', origin });
         }
         return [signer.address];
       }
@@ -116,6 +146,7 @@ function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broad
         if (!getNetwork(chainId)) throw providerError(4902, 'این شبکه هنوز اضافه نشده');
         settings.chainId = chainId; saveSettings();
         broadcastToPages('chainChanged', '0x' + chainId.toString(16));
+        logActivity({ kind: 'switch-chain', status: 'ok', origin, netName: (getNetwork(chainId) || {}).name || String(chainId) });
         return null;
       }
       case 'wallet_addEthereumChain': {
@@ -127,6 +158,7 @@ function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broad
         }
         settings.chainId = chainId; saveSettings();
         broadcastToPages('chainChanged', '0x' + chainId.toString(16));
+        logActivity({ kind: 'add-chain', status: 'ok', origin, netName: (getNetwork(chainId) || {}).name || String(chainId) });
         return null;
       }
       case 'eth_sendTransaction': {
@@ -134,36 +166,48 @@ function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broad
         const tx = params[0];
         const chainId = settings.chainId;
         const net = getNetwork(chainId);
-        const provider = getProvider(chainId);
-        const connected = signer.connect(provider);
-        const feeData = await provider.getFeeData();
-        const gasPriceWei = feeData.maxFeePerGas || feeData.gasPrice || 0n;
-        const gasPriceGwei = Number(ethers.formatUnits(gasPriceWei, 'gwei'));
-        const cap = settings.gasCapGwei;
-        const overCap = !!cap && gasPriceGwei > cap;
-        const auto = !!settings.autoSign[chainId];
-        if (auto && overCap) throw providerError(-32000, 'قیمت گس فعلی (' + gasPriceGwei.toFixed(1) + ' gwei) بالاتر از سقفی است که تعیین کرده‌اید — تراکنش ارسال نشد');
-        if (!auto) {
-          const approved = await openConfirm({ kind: 'tx', origin, chainId, netName: net ? net.name : chainId, symbol: net ? net.symbol : '', to: tx.to, valueWei: tx.value || '0x0', data: tx.data || '0x', gasPriceGwei: gasPriceGwei.toFixed(2), overCap });
-          if (!approved) throw providerError(4001, 'کاربر تراکنش را رد کرد');
+        const base = { kind: 'tx', origin, chainId, netName: net ? net.name : String(chainId), to: tx.to || '', value: fmtValue(tx.value, net) };
+        let auto = false;
+        try {
+          const provider = getProvider(chainId);
+          const connected = signer.connect(provider);
+          const feeData = await provider.getFeeData();
+          const gasPriceWei = feeData.maxFeePerGas || feeData.gasPrice || 0n;
+          const gasPriceGwei = Number(ethers.formatUnits(gasPriceWei, 'gwei'));
+          const cap = settings.gasCapGwei;
+          const overCap = !!cap && gasPriceGwei > cap;
+          auto = !!settings.autoSign[chainId];
+          if (auto && overCap) { const e = providerError(-32000, 'قیمت گس فعلی (' + gasPriceGwei.toFixed(1) + ' gwei) بالاتر از سقفی است که تعیین کرده‌اید — تراکنش ارسال نشد'); e.blocked = true; throw e; }
+          if (!auto) {
+            const approved = await openConfirm({ kind: 'tx', origin, chainId, netName: base.netName, symbol: net ? net.symbol : '', to: tx.to, valueWei: tx.value || '0x0', data: tx.data || '0x', gasPriceGwei: gasPriceGwei.toFixed(2), overCap });
+            if (!approved) throw providerError(4001, 'کاربر تراکنش را رد کرد');
+          }
+          const sent = await connected.sendTransaction({ to: tx.to, value: tx.value ? BigInt(tx.value) : 0n, data: tx.data || '0x', gasLimit: tx.gas ? BigInt(tx.gas) : undefined });
+          logActivity({ ...base, auto, status: 'ok', hash: sent.hash, gasGwei: gasPriceGwei.toFixed(2) });
+          return sent.hash;
+        } catch (err) {
+          if (!err._logged) failLog(err, { ...base, auto });
+          throw err;
         }
-        const sent = await connected.sendTransaction({ to: tx.to, value: tx.value ? BigInt(tx.value) : 0n, data: tx.data || '0x', gasLimit: tx.gas ? BigInt(tx.gas) : undefined });
-        return sent.hash;
       }
       case 'personal_sign': {
         if (!signer) throw providerError(4100, 'هیچ ولتی وصل نیست');
         const auto = !!settings.autoSign[settings.chainId];
-        if (!auto) { const ok = await openConfirm({ kind: 'sign', origin, message: params[0] }); if (!ok) throw providerError(4001, 'رد شد'); }
-        return await signer.signMessage(ethers.isBytesLike(params[0]) ? ethers.getBytes(params[0]) : params[0]);
+        if (!auto) { const ok = await openConfirm({ kind: 'sign', origin, message: params[0] }); if (!ok) throw failLog(providerError(4001, 'رد شد'), { kind: 'sign', origin, auto }); }
+        const sig = await signer.signMessage(ethers.isBytesLike(params[0]) ? ethers.getBytes(params[0]) : params[0]);
+        logActivity({ kind: 'sign', status: 'ok', auto, origin });
+        return sig;
       }
       case 'eth_signTypedData_v4': {
         if (!signer) throw providerError(4100, 'هیچ ولتی وصل نیست');
         const auto = !!settings.autoSign[settings.chainId];
-        if (!auto) { const ok = await openConfirm({ kind: 'sign-typed', origin }); if (!ok) throw providerError(4001, 'رد شد'); }
+        if (!auto) { const ok = await openConfirm({ kind: 'sign-typed', origin }); if (!ok) throw failLog(providerError(4001, 'رد شد'), { kind: 'sign-typed', origin, auto }); }
         const typed = JSON.parse(params[1]);
         const types = { ...typed.types };
         delete types.EIP712Domain;
-        return await signer.signTypedData(typed.domain, types, typed.message);
+        const sig = await signer.signTypedData(typed.domain, types, typed.message);
+        logActivity({ kind: 'sign-typed', status: 'ok', auto, origin });
+        return sig;
       }
       default: {
         const provider = getProvider(settings.chainId);
@@ -177,6 +221,8 @@ function createWallet({ instanceId, getLabel, userDataPath, getMainWindow, broad
 
   return {
     handleRequest,
+    getActivity: () => activity,
+    clearActivity: () => { activity = []; try { fs.writeFileSync(activityPath, '[]'); } catch {} },
     importPrivateKey,
     removeWallet,
     revealPrivateKey,

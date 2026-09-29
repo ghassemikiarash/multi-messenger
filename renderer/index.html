@@ -22,8 +22,23 @@
       <button class="nav-btn" id="navForward" title="جلو">&#8250;</button>
       <button class="nav-btn" id="navReload" title="بارگذاری مجدد">&#8635;</button>
       <input id="addressBar" class="address-bar" dir="ltr" spellcheck="false" placeholder="آدرس یا جستجو…" />
+      <button class="nav-btn" id="btnBookmark" title="بوکمارک (Ctrl+D)">&#9734;</button>
+      <button class="nav-btn activity-btn hidden" id="btnWalletActivity" title="اکتیویتی ولت">&#9889;</button>
       <button class="nav-btn wallet-icon" id="btnWalletProfile" title="ولت این پروفایل">&#128176;</button>
     </div>
+    <div id="bookmarksBar" class="bookmarks-bar"></div>
+  </div>
+  <div id="activityPanel" class="activity-panel hidden">
+    <div class="act-resizer" id="actResizer" title="بکش تا اندازه عوض بشه — دابل‌کلیک: برگشت به یک‌پنجم"></div>
+    <div class="act-head">
+      <div class="act-title"><b>اکتیویتی ولت</b><span id="actProfile" class="muted"></span></div>
+      <div class="act-tools">
+        <select id="actFilter"><option value="all">همه</option><option value="bad">فقط خطاها</option></select>
+        <button class="ghost" id="actClear" title="پاک کردن لاگ">پاک</button>
+        <button class="ghost" id="actClose" title="بستن">&times;</button>
+      </div>
+    </div>
+    <div id="actList" class="act-list"></div>
   </div>
   <div id="walletPopup" class="wallet-popup hidden"></div>
   <div id="lockScreen" class="overlay hidden">

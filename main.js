@@ -16,6 +16,9 @@ app.commandLine.appendSwitch('enable-features', 'WebRtcHideLocalIpsWithMdns');
 
 const SIDEBAR_WIDTH = 78;
 const TOOLBAR_HEIGHT = 78;
+const BOOKMARKS_BAR_HEIGHT = 34;
+let rightPanelWidth = 0;
+let audioState = {};
 const catalog = require('./catalog.json');
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 let userDataPath, statePath, lockPath, state, mainWindow;
@@ -59,7 +62,8 @@ function seedState() {
     instances: catalog.slice(0, 4).map((def) => ({ instanceId: def.appId + '-1', appId: def.appId, label: def.name, color: def.color, url: def.url, folderId: null, tabs: [{ id: 'tab-1', url: def.url, title: def.name }], activeTabId: 'tab-1' })),
     activeId: catalog[0] ? catalog[0].appId + '-1' : null,
     order: catalog.slice(0, 4).map((d) => d.appId + '-1'),
-    settings: { language: 'fa', notifications: true, autoLockMinutes: 0 },
+    settings: { language: 'fa', notifications: true, autoLockMinutes: 0, showBookmarksBar: true },
+    bookmarks: [],
   };
 }
 function loadState() {
@@ -72,7 +76,7 @@ function loadState() {
       return i;
     });
     if (!instances.length) return seedState();
-    return { folders: raw.folders || [], instances, activeId: raw.activeId || instances[0].instanceId, order: raw.order || instances.map((i) => i.instanceId), settings: raw.settings || { language: 'fa', notifications: true, autoLockMinutes: 0 } };
+    return { folders: raw.folders || [], instances, activeId: raw.activeId || instances[0].instanceId, order: raw.order || instances.map((i) => i.instanceId), settings: { language: 'fa', notifications: true, autoLockMinutes: 0, showBookmarksBar: true, ...(raw.settings || {}) }, bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.filter((b) => b && b.id && typeof b.url === 'string') : [] };
   } catch { return seedState(); }
 }
 function saveStateSoon() {
@@ -110,10 +114,40 @@ function getOrCreateWallet(instanceId) {
   walletManager.set(instanceId, w);
   return w;
 }
+function toolbarHeight() {
+  return TOOLBAR_HEIGHT + ((state && state.settings && state.settings.showBookmarksBar === false) ? 0 : BOOKMARKS_BAR_HEIGHT);
+}
 function getContentBounds() {
-  if (!mainWindow) return { x: SIDEBAR_WIDTH, y: TOOLBAR_HEIGHT, width: 800, height: 600 };
+  const th = toolbarHeight();
+  if (!mainWindow) return { x: SIDEBAR_WIDTH, y: th, width: 800, height: 600 };
   const [width, height] = mainWindow.getContentSize();
-  return { x: SIDEBAR_WIDTH, y: TOOLBAR_HEIGHT, width: Math.max(200, width - SIDEBAR_WIDTH), height: Math.max(150, height - TOOLBAR_HEIGHT) };
+  return { x: SIDEBAR_WIDTH, y: th, width: Math.max(200, width - SIDEBAR_WIDTH - rightPanelWidth), height: Math.max(150, height - th) };
+}
+function openNewTab(instanceId, customUrl) {
+  const inst = state.instances.find((i) => i.instanceId === instanceId);
+  if (!inst) return;
+  const appDef = catalog.find((a) => a.appId === inst.appId);
+  const url = (customUrl && isSafeHttpUrl(customUrl)) ? customUrl : ((appDef && appDef.url) || 'https://www.google.com');
+  const id = 'tab-' + Date.now();
+  inst.tabs = inst.tabs || [];
+  inst.tabs.push({ id, url, title: 'برگه جدید' });
+  inst.activeTabId = id;
+  saveStateSoon();
+  if (state.activeId === instanceId) switchTo(instanceId); else sendUi();
+}
+function pollAudio() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  Object.entries(views).forEach(([key, v]) => {
+    try {
+      if (v.webContents.isDestroyed()) return;
+      const audible = v.webContents.isCurrentlyAudible();
+      if (audioState[key] !== audible) {
+        audioState[key] = audible;
+        const [instanceId, tabId] = key.split('::');
+        mainWindow.webContents.send('tab-audio', { instanceId, tabId, audible });
+      }
+    } catch {}
+  });
 }
 function getActiveTabAndView() {
   const inst = state.instances.find((i) => i.instanceId === state.activeId);
@@ -147,6 +181,13 @@ function createViewForTab(instance, tab) {
   const view = new BrowserView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'renderer', 'wallet-preload.js'), additionalArguments: ['--mm-instance-id=' + instance.instanceId] } });
   const wc = view.webContents;
   wc.setUserAgent(CHROME_UA);
+  try { wc.setAudioMuted(!!tab.muted); } catch {}
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control) return;
+    const k = String(input.key || '').toLowerCase();
+    if (k === 'd' && !input.shift && mainWindow) { event.preventDefault(); mainWindow.webContents.send('shortcut', 'bookmark'); }
+    else if (k === 'b' && input.shift && mainWindow) { event.preventDefault(); mainWindow.webContents.send('shortcut', 'bookmarks-bar'); }
+  });
   wc.setWindowOpenHandler(({ url }) => { if (isSafeHttpUrl(url)) wc.loadURL(url); return { action: 'deny' }; });
   applyPrivacyHeaders(partition, wc.session);
   attachBlockerToPartition(partition, view);
@@ -191,7 +232,7 @@ function switchTo(instanceId) {
 }
 function sendUi() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('ui-state', { instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), overlayOpen, settings: state.settings, lockEnabled: !!loadLock().enabled });
+  mainWindow.webContents.send('ui-state', { instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), overlayOpen, settings: state.settings, bookmarks: state.bookmarks, audio: audioState, lockEnabled: !!loadLock().enabled });
 }
 function uniqueId(appId) {
   const ids = new Set(state.instances.map((i) => i.instanceId));
@@ -215,7 +256,7 @@ function createWindow() {
   });
 }
 function setupIpc() {
-  ipcMain.handle('get-ui', () => ({ instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), settings: state.settings, lockEnabled: !!loadLock().enabled }));
+  ipcMain.handle('get-ui', () => ({ instances: state.instances, folders: state.folders, order: state.order, activeId: state.activeId, catalog, version: app.getVersion(), settings: state.settings, bookmarks: state.bookmarks, audio: audioState, lockEnabled: !!loadLock().enabled }));
   ipcMain.on('switch-instance', (_e, id) => { if (typeof id === 'string') switchTo(id); });
   ipcMain.on('set-overlay', (_e, open) => { overlayOpen = !!open; if (overlayOpen) hideActiveView(); else showActiveView(); });
   ipcMain.on('add-instance', (_e, payload) => {
@@ -234,7 +275,7 @@ function setupIpc() {
     for (const tabId of tabIds) {
       const key = tabKey(instanceId, tabId);
       const view = views[key];
-      if (view) { try { if (mainWindow.getBrowserView() === view) mainWindow.setBrowserView(null); await view.webContents.session.clearStorageData(); } catch {} try { view.webContents.close(); } catch {} delete views[key]; }
+      if (view) { try { if (mainWindow.getBrowserView() === view) mainWindow.setBrowserView(null); await view.webContents.session.clearStorageData(); } catch {} try { view.webContents.close(); } catch {} delete views[key]; delete audioState[key]; }
     }
     state.instances = state.instances.filter((i) => i.instanceId !== instanceId);
     state.order = state.order.filter((id) => id !== instanceId);
@@ -242,17 +283,9 @@ function setupIpc() {
     if (state.activeId === instanceId) state.activeId = state.instances[0] ? state.instances[0].instanceId : null;
     saveStateSoon(); if (state.activeId) switchTo(state.activeId); else { hideActiveView(); sendUi(); }
   });
-  ipcMain.on('new-tab', (_e, instanceId) => {
-    const inst = state.instances.find((i) => i.instanceId === instanceId);
-    if (!inst) return;
-    const appDef = catalog.find((a) => a.appId === inst.appId);
-    const url = (appDef && appDef.url) || 'https://www.google.com';
-    const id = 'tab-' + Date.now();
-    inst.tabs = inst.tabs || [];
-    inst.tabs.push({ id, url, title: 'برگه جدید' });
-    inst.activeTabId = id;
-    saveStateSoon();
-    if (state.activeId === instanceId) switchTo(instanceId); else sendUi();
+  ipcMain.on('new-tab', (_e, arg) => {
+    if (typeof arg === 'string') openNewTab(arg);
+    else if (arg && arg.instanceId) openNewTab(arg.instanceId, arg.url);
   });
   ipcMain.on('close-tab', (_e, { instanceId, tabId }) => {
     const inst = state.instances.find((i) => i.instanceId === instanceId);
@@ -261,7 +294,7 @@ function setupIpc() {
     if (idx === -1) return;
     const key = tabKey(instanceId, tabId);
     const view = views[key];
-    if (view) { try { if (mainWindow.getBrowserView() === view) mainWindow.setBrowserView(null); view.webContents.close(); } catch {} delete views[key]; }
+    if (view) { try { if (mainWindow.getBrowserView() === view) mainWindow.setBrowserView(null); view.webContents.close(); } catch {} delete views[key]; delete audioState[key]; }
     inst.tabs.splice(idx, 1);
     if (inst.activeTabId === tabId) inst.activeTabId = inst.tabs[Math.max(0, idx - 1)].id;
     saveStateSoon();
@@ -373,6 +406,62 @@ function setupIpc() {
   });
   ipcMain.on('open-external', (_e, url) => { if (isSafeHttpUrl(url)) shell.openExternal(url); });
 
+  // ---- Bookmarks ----
+  const cleanTitle = (t, url) => { const x = String(t || '').trim().slice(0, 80); if (x) return x; try { return new URL(url).hostname; } catch { return String(url).slice(0, 40); } };
+  const setBookmarksBar = (v) => { state.settings.showBookmarksBar = !!v; saveStateSoon(); relayout(); setTimeout(relayout, 60); sendUi(); };
+  ipcMain.on('toggle-bookmark', (_e, { title, url }) => {
+    if (!isSafeHttpUrl(url) || String(url).length > 2000) return;
+    const idx = state.bookmarks.findIndex((b) => b.url === url);
+    if (idx >= 0) state.bookmarks.splice(idx, 1);
+    else state.bookmarks.push({ id: 'bm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), title: cleanTitle(title, url), url });
+    saveStateSoon(); sendUi();
+  });
+  ipcMain.on('rename-bookmark', (_e, { id, title }) => {
+    const b = state.bookmarks.find((x) => x.id === id);
+    if (!b) return;
+    b.title = cleanTitle(title, b.url); saveStateSoon(); sendUi();
+  });
+  ipcMain.on('open-bookmark', (_e, { url, newTab }) => {
+    if (!isSafeHttpUrl(url)) return;
+    const { inst, view } = getActiveTabAndView();
+    if (!inst) return;
+    if (newTab || !view) openNewTab(inst.instanceId, url);
+    else view.webContents.loadURL(url);
+  });
+  ipcMain.on('bookmark-menu', (_e, id) => {
+    const b = state.bookmarks.find((x) => x.id === id);
+    if (!b) return;
+    Menu.buildFromTemplate([
+      { label: 'باز کردن در برگه جدید', click: () => { if (state.activeId) openNewTab(state.activeId, b.url); } },
+      { label: 'تغییر نام', click: () => { if (mainWindow) mainWindow.webContents.send('ask-rename', { type: 'bookmark', id: b.id, value: b.title }); } },
+      { type: 'separator' },
+      { label: 'حذف بوکمارک', click: () => { state.bookmarks = state.bookmarks.filter((x) => x.id !== b.id); saveStateSoon(); sendUi(); } },
+    ]).popup({ window: mainWindow });
+  });
+  ipcMain.on('bookmarks-bar-menu', () => {
+    Menu.buildFromTemplate([{ label: 'پنهان کردن نوار بوکمارک', click: () => setBookmarksBar(false) }]).popup({ window: mainWindow });
+  });
+  ipcMain.on('toggle-bookmarks-bar', () => setBookmarksBar(state.settings.showBookmarksBar === false));
+
+  // ---- Per-tab mute ----
+  ipcMain.on('toggle-mute', (_e, { instanceId, tabId }) => {
+    const inst = state.instances.find((i) => i.instanceId === instanceId);
+    const tab = inst && (inst.tabs || []).find((t) => t.id === tabId);
+    if (!tab) return;
+    tab.muted = !tab.muted;
+    const v = views[tabKey(instanceId, tabId)];
+    if (v && !v.webContents.isDestroyed()) { try { v.webContents.setAudioMuted(tab.muted); } catch {} }
+    saveStateSoon(); sendUi();
+  });
+
+  // ---- Right-side panel (wallet activity): shrinks the page instead of hiding behind it ----
+  ipcMain.on('set-right-panel', (_e, px) => {
+    rightPanelWidth = Math.max(0, Math.min(Number(px) || 0, 900));
+    relayout(); setTimeout(relayout, 40);
+  });
+  ipcMain.handle('wallet-get-activity', (_e, instanceId) => getOrCreateWallet(instanceId).getActivity());
+  ipcMain.handle('wallet-clear-activity', (_e, instanceId) => { getOrCreateWallet(instanceId).clearActivity(); return true; });
+
   ipcMain.handle('wallet-request', async (_e, req) => {
     if (!req || !req.instanceId) return { error: { code: -32602, message: 'شناسه پروفایل نامعتبر است' } };
     try { return { result: await getOrCreateWallet(req.instanceId).handleRequest(req) }; }
@@ -400,6 +489,7 @@ app.whenReady().then(() => {
   attachNativeMenus(() => ({ state, mainWindow, refresh: sendUi }));
   createWindow();
   initAdblock();
+  setInterval(pollAudio, 1000);
 
   setInterval(() => {
     const minutes = (state.settings && state.settings.autoLockMinutes) || 0;
